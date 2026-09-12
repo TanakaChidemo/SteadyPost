@@ -13,7 +13,6 @@ venv/
 .env.local
 !.env.example
 !.env.local.example
-atlas-credentials.env
 
 # Build output
 .next/
