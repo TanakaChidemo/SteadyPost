@@ -1,21 +1,46 @@
-const { contentDrafts, newId } = require("../data/store");
+const mongoose = require("mongoose");
+const { newId } = require("../utils/id");
+
+const versionSchema = new mongoose.Schema(
+  { body: String, editedAt: Date, editedBy: String },
+  { _id: false }
+);
+
+const contentDraftSchema = new mongoose.Schema(
+  {
+    _id: { type: String, default: () => newId("draft") },
+    ownerId: { type: String, required: true, index: true },
+    title: { type: String, default: "Untitled Draft" },
+    body: { type: String, default: "" },
+    platforms: { type: [String], default: [] },
+    mediaUrls: { type: [String], default: [] },
+    status: { type: String, default: "draft" },
+    aiMetadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+    versions: { type: [versionSchema], default: [] },
+  },
+  { timestamps: true, minimize: false }
+);
+
+const ContentDraft = mongoose.models.ContentDraft || mongoose.model("ContentDraft", contentDraftSchema);
 
 async function find({ ownerId } = {}) {
-  return contentDrafts.filter((d) => !ownerId || d.ownerId === ownerId);
+  const query = ownerId ? { ownerId } : {};
+  return ContentDraft.find(query).lean();
 }
 
 async function findOne({ _id, ownerId } = {}) {
-  const draft = contentDrafts.find((d) => (!_id || d._id === _id) && (!ownerId || d.ownerId === ownerId));
-  return draft || null;
+  const query = {};
+  if (_id) query._id = _id;
+  if (ownerId) query.ownerId = ownerId;
+  return ContentDraft.findOne(query).lean();
 }
 
 async function findById(id) {
-  return contentDrafts.find((d) => d._id === id) || null;
+  return ContentDraft.findById(id).lean();
 }
 
 async function create(data) {
-  const draft = {
-    _id: newId("draft"),
+  const draft = await ContentDraft.create({
     title: data.title || "Untitled Draft",
     body: data.body || "",
     platforms: data.platforms || [],
@@ -24,25 +49,26 @@ async function create(data) {
     aiMetadata: data.aiMetadata || {},
     versions: data.versions || [],
     ownerId: data.ownerId,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  contentDrafts.unshift(draft);
-  return draft;
+  });
+  return draft.toObject();
 }
 
-// Mutates a draft object in place and stamps updatedAt — mirrors how the
-// controller calls `draft.save()` on the object it already has a reference to.
+// Mutates a draft object in place and persists it — mirrors how the
+// controller calls `ContentDraft.save(draft)` on a plain object it already
+// has a reference to (a lean() result, not a Mongoose document).
 async function save(draft) {
-  draft.updatedAt = new Date().toISOString();
+  const { _id, createdAt, updatedAt, __v, ...rest } = draft;
+  const updated = await ContentDraft.findByIdAndUpdate(_id, rest, { new: true, lean: true });
+  Object.assign(draft, updated);
   return draft;
 }
 
 async function deleteOne({ _id, ownerId } = {}) {
-  const idx = contentDrafts.findIndex((d) => (!_id || d._id === _id) && (!ownerId || d.ownerId === ownerId));
-  if (idx === -1) return { deletedCount: 0 };
-  contentDrafts.splice(idx, 1);
-  return { deletedCount: 1 };
+  const query = {};
+  if (_id) query._id = _id;
+  if (ownerId) query.ownerId = ownerId;
+  const result = await ContentDraft.deleteOne(query);
+  return { deletedCount: result.deletedCount };
 }
 
 module.exports = { find, findOne, findById, create, save, deleteOne };

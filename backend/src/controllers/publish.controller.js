@@ -1,7 +1,7 @@
 const { z } = require("zod");
 const { enqueuePublishJob } = require("../queue");
 const ContentDraft = require("../models/contentDraft.model");
-const { scheduledPosts, newId } = require("../data/store");
+const scheduledPostModel = require("../models/scheduledPost.model");
 
 const publishNowSchema = z.object({
   contentDraftId: z.string().min(1, "contentDraftId is required"),
@@ -22,19 +22,13 @@ async function publishNow(req, res) {
     return res.status(404).json({ error: "Content draft not found" });
   }
 
-  const scheduled = {
-    id: newId("post"),
+  const scheduled = await scheduledPostModel.create({
     ownerId: req.user.id,
     contentDraftId,
     platform,
     socialAccountId: socialAccountId || null,
-    scheduledAt: new Date().toISOString(),
     status: "publishing",
-    externalPostId: null,
-    errorMessage: null,
-    updatedAt: new Date().toISOString(),
-  };
-  scheduledPosts.push(scheduled);
+  });
 
   draft.status = "published";
   await ContentDraft.save(draft);
@@ -64,7 +58,7 @@ async function getStatus(req, res) {
   const { scheduledPostId } = req.params;
   if (!scheduledPostId) return res.status(400).json({ error: "scheduledPostId is required" });
 
-  const post = scheduledPosts.find((p) => p.id === scheduledPostId && p.ownerId === req.user.id);
+  const post = await scheduledPostModel.findOne({ id: scheduledPostId, ownerId: req.user.id });
   if (!post) return res.status(404).json({ error: "Scheduled post not found" });
 
   return res.json({

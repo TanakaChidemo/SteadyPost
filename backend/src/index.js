@@ -4,11 +4,15 @@ require("express-async-errors");
 const http = require("http");
 const app = require("./app");
 const logger = require("./config/logger");
+const { connectDB } = require("./config/db");
+const { seedDemoData } = require("./data/seed");
 const { initQueues } = require("./queue");
 
 const PORT = process.env.PORT || 4000;
 
 async function start() {
+  await connectDB();
+  await seedDemoData();
   await initQueues();
 
   const server = http.createServer(app);

@@ -55,6 +55,39 @@ cp frontend/.env.local.example frontend/.env.local
 The defaults work out of the box — you don't need to change anything to
 get the app running.
 
+### Optional: "Sign in with Google"
+
+Google login is optional — email/password sign-up works out of the box with
+no setup. If you want to test the Google button:
+
+1. Create an OAuth client at
+   [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)
+   (Web application type). Set the authorized redirect URI to
+   `http://localhost:4000/api/v1/auth/oauth/google/callback`.
+2. Leave the OAuth consent screen in **Testing** mode — as the project
+   owner your own Google account can sign in without needing app
+   verification.
+3. Put the Client ID/Secret in `backend/.env`:
+   ```
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   ```
+
+Because everyone runs the backend on `http://localhost:4000` in dev, the
+redirect URI above is identical for every developer's machine — there's no
+need for each teammate to create their own Google Cloud project. Share one
+"dev" OAuth client's Client ID/Secret across the team (through a password
+manager, not the repo) and everyone pastes the same two values into their
+own local `backend/.env`.
+
+**Gotcha:** the callback redirects the browser to `FRONTEND_URL` (from
+`backend/.env`, defaults to `http://localhost:3000`) once sign-in
+completes. If you've changed the frontend's port mapping in
+`docker-compose.yml` — for example to avoid clashing with another project
+already using port 3000 — update `FRONTEND_URL` to match, or Google login
+will silently redirect you into whatever else is running on the old port
+instead of this app.
+
 ### Optional: real AI generation
 
 Without any AI key, the AI service falls back to a canned template — it
@@ -86,8 +119,9 @@ terminal (or add `-d` to run in the background).
 - API docs (Swagger UI): http://localhost:4000/api/docs
 - AI service health: http://localhost:5001/health
 
-The dashboard auto-logs you in with a demo account on first load, and two
-demo social accounts (Instagram + Facebook) are already "connected" — there's
+Sign in to try it: either register a new account, or log in with the
+seeded demo account (`demo@example.com` / `password123`), which already has
+two social accounts (Instagram + Facebook) and a sample draft connected —
 nothing else to configure to try the full flow.
 
 ## Troubleshooting

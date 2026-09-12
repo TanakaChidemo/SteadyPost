@@ -3,7 +3,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { z } = require("zod");
 const userModel = require("../models/user.model");
-const { socialAccounts, newId } = require("../data/store");
+const socialAccountModel = require("../models/socialAccount.model");
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "changeme_access_secret";
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "changeme_refresh_secret";
@@ -79,27 +79,8 @@ async function login(req, res) {
     });
   }
 
-  if (!user || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
+  if (!user || !user.passwordHash || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
     return res.status(401).json({ error: "Invalid email or password" });
-  }
-
-  return res.json({
-    user: { id: user.id, email: user.email, name: user.name, role: user.role },
-    accessToken: signAccessToken(user),
-    refreshToken: signRefreshToken(user),
-  });
-}
-
-async function demoLogin(req, res) {
-  let user = await userModel.findByEmail("demo@example.com");
-  if (!user) {
-    const passwordHash = await bcrypt.hash("password123", 10);
-    user = await userModel.create({
-      email: "demo@example.com",
-      passwordHash,
-      name: "Tanaka Chidemo (Demo)",
-      role: "admin",
-    });
   }
 
   return res.json({
@@ -138,6 +119,111 @@ async function logout(req, res) {
   return res.status(200).json({ message: "Logged out successfully" });
 }
 
+const GOOGLE_OAUTH_STATE_SECRET = JWT_ACCESS_SECRET;
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+
+function signOAuthState() {
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const signature = crypto.createHmac("sha256", GOOGLE_OAUTH_STATE_SECRET).update(nonce).digest("hex");
+  return `${nonce}.${signature}`;
+}
+
+function verifyOAuthState(state) {
+  if (!state || typeof state !== "string" || !state.includes(".")) return false;
+  const [nonce, signature] = state.split(".");
+  const expected = crypto.createHmac("sha256", GOOGLE_OAUTH_STATE_SECRET).update(nonce).digest("hex");
+  return (
+    signature.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+  );
+}
+
+async function startGoogleOAuth(req, res) {
+  if (!process.env.GOOGLE_CLIENT_ID) {
+    return res.status(501).json({ error: "Google OAuth is not configured on this server" });
+  }
+
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: process.env.GOOGLE_REDIRECT_URI || "http://localhost:4000/api/v1/auth/oauth/google/callback",
+    response_type: "code",
+    scope: "openid email profile",
+    access_type: "online",
+    prompt: "select_account",
+    state: signOAuthState(),
+  });
+
+  return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+}
+
+async function handleGoogleOAuthCallback(req, res) {
+  const { code, state, error: oauthError } = req.query;
+
+  if (oauthError) {
+    return res.redirect(`${FRONTEND_URL}/auth/callback?error=${encodeURIComponent(oauthError)}`);
+  }
+
+  if (!code || !verifyOAuthState(state)) {
+    return res.redirect(`${FRONTEND_URL}/auth/callback?error=invalid_state`);
+  }
+
+  try {
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI || "http://localhost:4000/api/v1/auth/oauth/google/callback",
+        grant_type: "authorization_code",
+      }),
+    });
+
+    if (!tokenRes.ok) {
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=token_exchange_failed`);
+    }
+
+    const { access_token: googleAccessToken } = await tokenRes.json();
+
+    const profileRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${googleAccessToken}` },
+    });
+
+    if (!profileRes.ok) {
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=profile_fetch_failed`);
+    }
+
+    const profile = await profileRes.json();
+    if (!profile.email) {
+      return res.redirect(`${FRONTEND_URL}/auth/callback?error=no_email_scope`);
+    }
+
+    let user = await userModel.findByGoogleId(profile.sub);
+    if (!user) {
+      user = await userModel.findByEmail(profile.email);
+      if (user) {
+        await userModel.linkGoogleId(user.id, profile.sub);
+      } else {
+        user = await userModel.create({
+          email: profile.email,
+          name: profile.name || profile.email,
+          role: "member",
+          googleId: profile.sub,
+        });
+      }
+    }
+
+    const params = new URLSearchParams({
+      accessToken: signAccessToken(user),
+      refreshToken: signRefreshToken(user),
+    });
+    return res.redirect(`${FRONTEND_URL}/auth/callback?${params.toString()}`);
+  } catch (err) {
+    return res.redirect(`${FRONTEND_URL}/auth/callback?error=oauth_failed`);
+  }
+}
+
 async function startMetaOAuth(req, res) {
   const stateToken = crypto
     .createHmac("sha256", JWT_ACCESS_SECRET)
@@ -160,17 +246,15 @@ async function handleMetaOAuthCallback(req, res) {
   const userId = state ? state.split("_")[0] : null;
 
   if (userId) {
-    socialAccounts.push({
-      id: newId("sa"),
+    await socialAccountModel.create({
       ownerId: userId,
       platform: "facebook",
       externalAccountId: `fb_page_${Date.now()}`,
       displayName: "Connected Facebook Page",
-      linkedAt: new Date().toISOString(),
     });
   }
 
-  return res.redirect("http://localhost:3000/dashboard/accounts?connected=facebook");
+  return res.redirect(`${FRONTEND_URL}/dashboard/accounts?connected=facebook`);
 }
 
 async function connectMockAccount(req, res) {
@@ -180,15 +264,12 @@ async function connectMockAccount(req, res) {
   const extId = handle || `${platform}_${Date.now()}`;
   const name = displayName || `${platform.toUpperCase()} Account (@${extId})`;
 
-  const account = {
-    id: newId("sa"),
+  const account = await socialAccountModel.create({
     ownerId: req.user.id,
     platform,
     externalAccountId: extId,
     displayName: name,
-    linkedAt: new Date().toISOString(),
-  };
-  socialAccounts.push(account);
+  });
 
   return res.status(201).json(account);
 }
@@ -200,10 +281,11 @@ async function notImplemented(req, res) {
 module.exports = {
   register,
   login,
-  demoLogin,
   me,
   refresh,
   logout,
+  startGoogleOAuth,
+  handleGoogleOAuthCallback,
   startMetaOAuth,
   handleMetaOAuthCallback,
   connectMockAccount,

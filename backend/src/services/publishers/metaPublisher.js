@@ -1,5 +1,5 @@
 const logger = require("../../config/logger");
-const { socialAccounts } = require("../../data/store");
+const socialAccountModel = require("../../models/socialAccount.model");
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || "v20.0";
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
@@ -23,7 +23,7 @@ async function getSocialAccountCredentials(socialAccountId) {
     return MOCK_CREDENTIALS;
   }
 
-  const account = socialAccounts.find((a) => a.id === socialAccountId);
+  const account = await socialAccountModel.findById(socialAccountId);
   if (!account) {
     logger.warn({ socialAccountId }, "Social account not found, using sandbox simulation");
     return MOCK_CREDENTIALS;

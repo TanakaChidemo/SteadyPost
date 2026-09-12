@@ -7,10 +7,13 @@ const router = express.Router();
 // Local auth
 router.post("/register", authController.register);
 router.post("/login", authController.login);
-router.post("/demo", authController.demoLogin);
 router.get("/me", requireAuth, authController.me);
 router.post("/refresh", authController.refresh);
 router.post("/logout", requireAuth, authController.logout);
+
+// Google OAuth login (sign in/sign up with Google — no existing session required)
+router.get("/oauth/google", authController.startGoogleOAuth);
+router.get("/oauth/google/callback", authController.handleGoogleOAuthCallback);
 
 // Social account linking
 router.post("/connect-mock", requireAuth, authController.connectMockAccount);

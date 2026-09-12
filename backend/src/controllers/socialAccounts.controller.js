@@ -1,9 +1,7 @@
-const { socialAccounts, newId } = require("../data/store");
+const socialAccountModel = require("../models/socialAccount.model");
 
 async function list(req, res) {
-  const items = socialAccounts
-    .filter((a) => a.ownerId === req.user.id)
-    .sort((a, b) => new Date(b.linkedAt) - new Date(a.linkedAt));
+  const items = await socialAccountModel.list(req.user.id);
   return res.json({ items });
 }
 
@@ -14,24 +12,20 @@ async function link(req, res) {
   const extId = handle || `${platform}_${Date.now()}`;
   const name = displayName || `${platform.toUpperCase()} Account (@${extId})`;
 
-  const account = {
-    id: newId("sa"),
+  const account = await socialAccountModel.create({
     ownerId: req.user.id,
     platform,
     externalAccountId: extId,
     displayName: name,
-    linkedAt: new Date().toISOString(),
-  };
-  socialAccounts.push(account);
+  });
 
   return res.status(201).json(account);
 }
 
 async function unlink(req, res) {
-  const idx = socialAccounts.findIndex((a) => a.id === req.params.id && a.ownerId === req.user.id);
-  if (idx === -1) return res.status(404).json({ error: "Social account not found" });
+  const result = await socialAccountModel.deleteOne({ _id: req.params.id, ownerId: req.user.id });
+  if (result.deletedCount === 0) return res.status(404).json({ error: "Social account not found" });
 
-  socialAccounts.splice(idx, 1);
   return res.status(204).send();
 }
 

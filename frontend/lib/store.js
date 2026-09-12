@@ -1,19 +1,11 @@
 import { create } from "zustand";
 
 export const useAppStore = create((set, get) => ({
-  user: {
-    id: "11111111-1111-1111-1111-111111111111",
-    email: "demo@example.com",
-    name: "Tanaka Chidemo",
-    role: "admin",
-  },
-  token: "demo_access_token",
+  user: null,
+  token: null,
   drafts: [],
   activeDraft: null,
-  socialAccounts: [
-    { id: "sa_2", platform: "instagram", displayName: "TechPulse Studio (@techpulse.studio)" },
-    { id: "sa_4", platform: "facebook", displayName: "TechPulse Global Page" },
-  ],
+  socialAccounts: [],
   toasts: [],
   isAuthModalOpen: false,
   isAiModalOpen: false,

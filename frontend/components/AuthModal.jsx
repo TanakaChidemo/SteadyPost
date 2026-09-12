@@ -5,6 +5,9 @@ import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
 import { SparklesIcon, CheckIcon } from "./Icons";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000/api/v1";
+
 export function AuthModal() {
   const { isAuthModalOpen, setAuthModalOpen, setUser, addToast } = useAppStore();
   const [isRegister, setIsRegister] = useState(false);
@@ -36,24 +39,8 @@ export function AuthModal() {
     }
   }
 
-  async function handleDemoLogin() {
-    setLoading(true);
-    try {
-      const res = await api.auth.demo();
-      setUser(res.user, res.accessToken);
-      addToast("success", "Logged in with Tanaka Chidemo (Demo Account)");
-      setAuthModalOpen(false);
-    } catch (err) {
-      // Fallback local demo user
-      setUser(
-        { id: "11111111-1111-1111-1111-111111111111", email: "demo@example.com", name: "Tanaka Chidemo", role: "admin" },
-        "demo_access_token"
-      );
-      addToast("success", "Demo session initialized");
-      setAuthModalOpen(false);
-    } finally {
-      setLoading(false);
-    }
+  function handleGoogleLogin() {
+    window.location.href = `${API_BASE_URL}/auth/oauth/google`;
   }
 
   return (
@@ -78,14 +65,39 @@ export function AuthModal() {
           </p>
         </div>
 
-        {/* 1-Click Instant Demo Access */}
+        <div className="flex mb-5 rounded-md bg-slate-950 border border-slate-800 p-1">
+          <button
+            type="button"
+            onClick={() => setIsRegister(false)}
+            className={`flex-1 py-2 rounded text-xs font-semibold transition ${
+              !isRegister ? "bg-slate-800 text-white" : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsRegister(true)}
+            className={`flex-1 py-2 rounded text-xs font-semibold transition ${
+              isRegister ? "bg-slate-800 text-white" : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            Sign Up
+          </button>
+        </div>
+
         <button
-          onClick={handleDemoLogin}
+          onClick={handleGoogleLogin}
           disabled={loading}
-          className="w-full mb-4 py-2.5 px-4 rounded-md bg-gradient-to-r from-indigo-600/30 via-purple-600/30 to-pink-600/30 border border-indigo-500/50 hover:border-indigo-400 text-indigo-200 text-xs font-semibold flex items-center justify-center gap-2 transition"
+          className="w-full mb-3 py-2.5 px-4 rounded-md bg-white hover:bg-slate-100 text-slate-800 text-xs font-semibold flex items-center justify-center gap-2 transition"
         >
-          <SparklesIcon className="w-4 h-4 text-indigo-400" />
-          <span>⚡ Instant 1-Click Demo Login (Tanaka Chidemo)</span>
+          <svg className="w-4 h-4" viewBox="0 0 48 48" aria-hidden="true">
+            <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.6-6 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l5.7-5.7C34.6 6 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z" />
+            <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l5.7-5.7C34.6 6 29.6 4 24 4c-7.5 0-14 4.2-17.7 10.7z" />
+            <path fill="#4CAF50" d="M24 44c5.5 0 10.4-1.9 14.3-5.1l-6.6-5.6C29.6 35 26.9 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.6 5.1C9.9 39.7 16.4 44 24 44z" />
+            <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.6 5.6C41.3 36.1 44 30.5 44 24c0-1.3-.1-2.7-.4-3.5z" />
+          </svg>
+          <span>Continue with Google</span>
         </button>
 
         <div className="flex items-center my-3 text-slate-600 text-xs">
@@ -141,16 +153,6 @@ export function AuthModal() {
             {loading ? "Please wait..." : isRegister ? "Create Account" : "Sign In"}
           </button>
         </form>
-
-        <div className="text-center mt-4 text-xs text-slate-400">
-          {isRegister ? "Already have an account? " : "Don't have an account yet? "}{""}
-          <button
-            onClick={() => setIsRegister(!isRegister)}
-            className="text-indigo-400 hover:underline font-medium"
-          >
-            {isRegister ? "Sign in" : "Register here"}
-          </button>
-        </div>
       </div>
     </div>
   );
