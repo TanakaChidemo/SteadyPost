@@ -17,7 +17,7 @@ async function start() {
 
   const server = http.createServer(app);
   server.listen(PORT, () => {
-    logger.info(`smp-backend listening on port ${PORT}`);
+    logger.info(`steadypost-backend listening on port ${PORT}`);
   });
 
   const shutdown = async (signal) => {

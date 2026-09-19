@@ -58,7 +58,7 @@ export function AuthModal() {
             <SparklesIcon className="w-6 h-6 text-white" />
           </div>
           <h2 className="text-xl font-bold text-white">
-            {isRegister ? "Create your Account" : "Sign In to SocialSphere"}
+            {isRegister ? "Create your Account" : "Sign In to SteadyPost"}
           </h2>
           <p className="text-xs text-slate-400 mt-1">
             AI Copywriting & Instant Publishing to Instagram & Facebook

@@ -15,15 +15,17 @@ import {
 } from "../../components/Icons";
 
 export default function DashboardOverviewPage() {
-  const { user, drafts, setDrafts, socialAccounts, addToast, setAiModalOpen } = useAppStore();
+  const { user, authReady, token, drafts, setDrafts, socialAccounts, addToast, setAiModalOpen } = useAppStore();
 
   const [quickPost, setQuickPost] = useState("");
   const [quickPlatform, setQuickPlatform] = useState("instagram");
   const [isPublishing, setIsPublishing] = useState(false);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    // Wait for auth to be resolved (token restored from localStorage) so this
+    // doesn't fire before login and silently 401, leaving stats stuck at 0.
+    if (authReady) loadData();
+  }, [authReady, token]);
 
   async function loadData() {
     try {
@@ -43,12 +45,17 @@ export default function DashboardOverviewPage() {
         body: quickPost,
         platforms: [quickPlatform],
       });
-      await api.publish.now({
+      const { postId } = await api.publish.now({
         contentDraftId: draft._id,
         platform: quickPlatform,
       });
-      addToast("success", `🚀 Published to ${quickPlatform}!`);
-      setQuickPost("");
+      const result = await api.publish.waitForResult(postId);
+      if (result.status === "published") {
+        addToast("success", `🚀 Published to ${quickPlatform}!`);
+        setQuickPost("");
+      } else {
+        addToast("error", `Failed to publish to ${quickPlatform}: ${result.errorMessage || "Publishing did not complete"}`);
+      }
       loadData();
     } catch (err) {
       addToast("error", err.message || "Failed to publish");

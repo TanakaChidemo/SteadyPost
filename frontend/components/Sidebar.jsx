@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -11,6 +11,7 @@ import {
   FacebookIcon,
 } from "./Icons";
 import { useAppStore } from "../lib/store";
+import { api } from "../lib/apiClient";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Overview", icon: LayersIcon },
@@ -20,7 +21,20 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { socialAccounts } = useAppStore();
+  const { authReady, token, socialAccounts, setSocialAccounts } = useAppStore();
+
+  // The sidebar is mounted on every dashboard page, so this is also what
+  // populates socialAccounts for pages (like Overview) that display connection
+  // state but don't fetch it themselves.
+  useEffect(() => {
+    if (!authReady) return;
+    api.socialAccounts
+      .list()
+      .then(setSocialAccounts)
+      .catch(() => {});
+  }, [authReady, token, setSocialAccounts]);
+
+  const isConnected = (platform) => socialAccounts.some((a) => a.platform === platform);
 
   return (
     <aside className="w-64 shrink-0 border-r border-slate-800/80 bg-slate-950/60 p-4 flex flex-col justify-between hidden md:flex min-h-[calc(100vh-4rem)]">
@@ -79,14 +93,18 @@ export function Sidebar() {
                 <InstagramIcon className="w-3.5 h-3.5 text-pink-400" />
                 <span>Instagram</span>
               </div>
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span
+                className={`w-2 h-2 rounded-full ${isConnected("instagram") ? "bg-emerald-400" : "bg-slate-700"}`}
+              />
             </div>
             <div className="flex items-center justify-between text-xs text-slate-400">
               <div className="flex items-center gap-2">
                 <FacebookIcon className="w-3.5 h-3.5 text-blue-500" />
                 <span>Facebook</span>
               </div>
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span
+                className={`w-2 h-2 rounded-full ${isConnected("facebook") ? "bg-emerald-400" : "bg-slate-700"}`}
+              />
             </div>
           </div>
         </div>

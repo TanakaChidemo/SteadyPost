@@ -1,8 +1,15 @@
 import { create } from "zustand";
+import { api } from "./apiClient";
 
 export const useAppStore = create((set, get) => ({
   user: null,
   token: null,
+  // True once we've checked localStorage for a token and (if present)
+  // confirmed it against GET /auth/me. Components that fetch user-scoped
+  // data on mount should wait for this instead of firing immediately —
+  // otherwise the very first request races the token being loaded and
+  // just 401s silently.
+  authReady: false,
   drafts: [],
   activeDraft: null,
   socialAccounts: [],
@@ -10,6 +17,22 @@ export const useAppStore = create((set, get) => ({
   isAuthModalOpen: false,
   isAiModalOpen: false,
   isLoading: false,
+
+  hydrate: async () => {
+    if (typeof window === "undefined") return;
+    const token = window.localStorage.getItem("accessToken");
+    if (!token) {
+      set({ authReady: true });
+      return;
+    }
+    try {
+      const { user } = await api.auth.me();
+      set({ user, token, authReady: true });
+    } catch (err) {
+      window.localStorage.removeItem("accessToken");
+      set({ user: null, token: null, authReady: true });
+    }
+  },
 
   setUser: (user, token) => {
     if (token !== undefined && typeof window !== "undefined") {
@@ -19,7 +42,7 @@ export const useAppStore = create((set, get) => ({
         window.localStorage.removeItem("accessToken");
       }
     }
-    set({ user, token: token !== undefined ? token : get().token });
+    set({ user, token: token !== undefined ? token : get().token, authReady: true });
   },
 
   logout: () => {

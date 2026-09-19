@@ -21,7 +21,7 @@ export default function HomePage() {
           <div className="w-9 h-9 rounded-md gradient-brand flex items-center justify-center">
             <SparklesIcon className="w-5 h-5 text-white" />
           </div>
-          <span className="font-bold text-lg tracking-tight text-white">SocialSphere</span>
+          <span className="font-bold text-lg tracking-tight text-white">SteadyPost</span>
         </div>
 
         <div className="flex items-center gap-3">
@@ -108,7 +108,7 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="h-16 max-w-7xl mx-auto w-full px-6 flex items-center justify-between border-t border-slate-900 text-xs text-slate-500">
-        <div>© 2026 SocialSphere Platform. All rights reserved.</div>
+        <div>© 2026 SteadyPost Platform. All rights reserved.</div>
         <div className="flex items-center gap-4">
           <Link href="/dashboard" className="hover:text-slate-300">Dashboard</Link>
           <Link href="/dashboard/content" className="hover:text-slate-300">Studio</Link>

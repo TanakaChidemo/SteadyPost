@@ -38,6 +38,12 @@ export const api = {
     login: (data) => apiClient.post("/auth/login", data).then((r) => r.data),
     register: (data) => apiClient.post("/auth/register", data).then((r) => r.data),
     me: () => apiClient.get("/auth/me").then((r) => r.data),
+    // accessToken here is the User Access Token the Facebook JS SDK hands
+    // back from FB.login() with a Business Login config_id — not our own JWT.
+    listMetaPages: (accessToken) =>
+      apiClient.post("/auth/oauth/meta/pages", { accessToken }).then((r) => r.data),
+    connectMetaPage: (accessToken, pageId) =>
+      apiClient.post("/auth/oauth/meta/connect", { accessToken, pageId }).then((r) => r.data),
   },
   content: {
     list: () => apiClient.get("/content").then((r) => r.data.items || []),
@@ -53,6 +59,19 @@ export const api = {
   publish: {
     now: (data) => apiClient.post("/publish/now", data).then((r) => r.data),
     getStatus: (id) => apiClient.get(`/publish/status/${id}`).then((r) => r.data),
+    // Publish jobs run async on the backend (202 Publishing -> published/failed).
+    // Poll status instead of trusting the 202 response, so real failures (e.g. an
+    // Instagram media-format rejection) surface to the user instead of being silent.
+    waitForResult: async (postId, { intervalMs = 800, timeoutMs = 12000 } = {}) => {
+      const start = Date.now();
+      let last = null;
+      while (Date.now() - start < timeoutMs) {
+        last = await apiClient.get(`/publish/status/${postId}`).then((r) => r.data);
+        if (last.status !== "publishing") return last;
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+      return last || { id: postId, status: "timeout", errorMessage: "Timed out waiting for publish result" };
+    },
   },
   socialAccounts: {
     list: () => apiClient.get("/social-accounts").then((r) => r.data.items || []),

@@ -64,7 +64,7 @@ async function generateCaption(req, res) {
   return res.json({
     platform,
     caption,
-    model: "smp-ai-engine-v2",
+    model: "steadypost-ai-engine-v2",
     tone,
   });
 }
@@ -93,7 +93,7 @@ async function suggestHashtags(req, res) {
   return res.json({
     platform,
     hashtags: combined,
-    model: "smp-ai-engine-v2",
+    model: "steadypost-ai-engine-v2",
   });
 }
 
@@ -126,7 +126,7 @@ async function repurposeContent(req, res) {
   return res.json({
     sourcePlatform,
     repurposed,
-    model: "smp-ai-engine-v2",
+    model: "steadypost-ai-engine-v2",
   });
 }
 

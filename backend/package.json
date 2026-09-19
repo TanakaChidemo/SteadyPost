@@ -1,5 +1,5 @@
 {
-  "name": "smp-backend",
+  "name": "steadypost-backend",
   "version": "0.1.0",
   "description": "API gateway / core backend for the Social Media Content Publishing System",
   "main": "src/index.js",

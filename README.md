@@ -1,4 +1,4 @@
-# SocialSphere
+# SteadyPost
 
 A content publishing tool for Instagram and Facebook: log in, write a post
 (optionally with AI help), attach a photo or video, and publish it.

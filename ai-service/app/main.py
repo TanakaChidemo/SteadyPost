@@ -16,7 +16,7 @@ def create_app():
 
     @app.get("/health")
     def health():
-        return jsonify(status="ok", service="smp-ai-service")
+        return jsonify(status="ok", service="steadypost-ai-service")
 
     @app.errorhandler(Exception)
     def handle_error(err):

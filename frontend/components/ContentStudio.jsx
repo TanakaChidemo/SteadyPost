@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
 import {
@@ -27,30 +28,63 @@ function isVideoUrl(url) {
 }
 
 export function ContentStudio() {
-  const { drafts, setDrafts, activeDraft, setActiveDraft, addToast, setAiModalOpen, socialAccounts } = useAppStore();
+  const { authReady, token, drafts, setDrafts, activeDraft, setActiveDraft, addToast, setAiModalOpen, socialAccounts } =
+    useAppStore();
 
   const [title, setTitle] = useState("New Social Campaign");
   const [body, setBody] = useState("");
-  const [selectedPlatforms, setSelectedPlatforms] = useState(["instagram", "facebook"]);
+  // Which connected accounts to publish to — not which platforms. Someone
+  // can have more than one connected Facebook Page, so "Instagram vs
+  // Facebook" isn't a fine-grained enough choice.
+  const [selectedAccountIds, setSelectedAccountIds] = useState([]);
   const [mediaUrls, setMediaUrls] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [previewPlatform, setPreviewPlatform] = useState("instagram");
   const [previewMediaIndex, setPreviewMediaIndex] = useState(0);
   const [loading, setLoading] = useState(false);
 
+  // Draft metadata still stores platform *types* (instagram/facebook), not
+  // specific accounts — derive that list from whatever's currently selected.
+  const selectedPlatforms = Array.from(
+    new Set(
+      selectedAccountIds
+        .map((id) => socialAccounts.find((a) => a.id === id)?.platform)
+        .filter(Boolean)
+    )
+  );
+
+  // The account the Live Feed Preview labels itself with — prefer a selected
+  // account for the previewed platform, otherwise any connected one.
+  const previewAccount =
+    socialAccounts.find((a) => a.platform === previewPlatform && selectedAccountIds.includes(a.id)) ||
+    socialAccounts.find((a) => a.platform === previewPlatform) ||
+    null;
+
   useEffect(() => {
-    loadDrafts();
-  }, []);
+    if (authReady) loadDrafts();
+  }, [authReady, token]);
+
+  // Default to every connected account when starting a fresh (non-draft) post.
+  useEffect(() => {
+    if (!activeDraft && socialAccounts.length > 0 && selectedAccountIds.length === 0) {
+      setSelectedAccountIds(socialAccounts.map((a) => a.id));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socialAccounts]);
 
   useEffect(() => {
     if (activeDraft) {
       setTitle(activeDraft.title);
       setBody(activeDraft.body);
-      setSelectedPlatforms(activeDraft.platforms.length > 0 ? activeDraft.platforms : ["instagram", "facebook"]);
+      // Old drafts only recorded platform types, not specific accounts —
+      // best effort: select every currently-connected account of those types.
+      const platforms = activeDraft.platforms.length > 0 ? activeDraft.platforms : ["instagram", "facebook"];
+      setSelectedAccountIds(socialAccounts.filter((a) => platforms.includes(a.platform)).map((a) => a.id));
       setMediaUrls(activeDraft.mediaUrls || []);
       setPreviewMediaIndex(0);
     }
-  }, [activeDraft]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDraft, socialAccounts]);
 
   async function loadDrafts() {
     try {
@@ -64,17 +98,24 @@ export function ContentStudio() {
     }
   }
 
-  function togglePlatform(id) {
-    if (selectedPlatforms.includes(id)) {
-      if (selectedPlatforms.length === 1) return addToast("info", "At least one platform must be selected");
-      setSelectedPlatforms(selectedPlatforms.filter((p) => p !== id));
-      if (previewPlatform === id) {
-        const remaining = selectedPlatforms.filter((p) => p !== id);
-        if (remaining.length > 0) setPreviewPlatform(remaining[0]);
+  function toggleAccount(accountId) {
+    const account = socialAccounts.find((a) => a.id === accountId);
+    if (selectedAccountIds.includes(accountId)) {
+      if (selectedAccountIds.length === 1) return addToast("info", "At least one account must be selected");
+      const remainingIds = selectedAccountIds.filter((id) => id !== accountId);
+      setSelectedAccountIds(remainingIds);
+      if (account && previewPlatform === account.platform) {
+        const stillHasPlatform = remainingIds.some(
+          (id) => socialAccounts.find((a) => a.id === id)?.platform === account.platform
+        );
+        if (!stillHasPlatform) {
+          const remainingPlatform = socialAccounts.find((a) => remainingIds.includes(a.id))?.platform;
+          if (remainingPlatform) setPreviewPlatform(remainingPlatform);
+        }
       }
     } else {
-      setSelectedPlatforms([...selectedPlatforms, id]);
-      setPreviewPlatform(id);
+      setSelectedAccountIds([...selectedAccountIds, accountId]);
+      if (account) setPreviewPlatform(account.platform);
     }
   }
 
@@ -113,6 +154,9 @@ export function ContentStudio() {
 
   async function handlePublishNow() {
     if (!body.trim()) return addToast("error", "Please write post content before publishing");
+    if (selectedAccountIds.length === 0) {
+      return addToast("error", "Connect a social account first — see the Social Accounts page.");
+    }
 
     setLoading(true);
     try {
@@ -128,16 +172,34 @@ export function ContentStudio() {
         setActiveDraft(created);
       }
 
-      for (const plt of selectedPlatforms) {
-        const account = socialAccounts.find((a) => a.platform === plt);
-        await api.publish.now({
+      const submissions = [];
+      for (const accountId of selectedAccountIds) {
+        const account = socialAccounts.find((a) => a.id === accountId);
+        if (!account) continue;
+        const { postId } = await api.publish.now({
           contentDraftId: draftId,
-          platform: plt,
-          socialAccountId: account?.id || null,
+          platform: account.platform,
+          socialAccountId: account.id,
         });
+        submissions.push({ account, postId });
       }
 
-      addToast("success", `🚀 Published to ${selectedPlatforms.join(", ")} successfully!`);
+      const results = await Promise.all(
+        submissions.map(async (s) => ({ ...s, result: await api.publish.waitForResult(s.postId) }))
+      );
+
+      const succeeded = results.filter((r) => r.result.status === "published").map((r) => r.account.displayName);
+      const failed = results.filter((r) => r.result.status !== "published");
+
+      if (succeeded.length > 0) {
+        addToast("success", `🚀 Published to ${succeeded.join(", ")} successfully!`);
+      }
+      failed.forEach((f) => {
+        addToast(
+          "error",
+          `Failed to publish to ${f.account.displayName}: ${f.result.errorMessage || "Publishing did not complete"}`
+        );
+      });
     } catch (err) {
       addToast("error", err.message || "Publishing failed");
     } finally {
@@ -149,7 +211,7 @@ export function ContentStudio() {
     setActiveDraft(null);
     setTitle(`Campaign #${drafts.length + 1}`);
     setBody("");
-    setSelectedPlatforms(["instagram", "facebook"]);
+    setSelectedAccountIds(socialAccounts.map((a) => a.id));
     setMediaUrls([]);
     setPreviewMediaIndex(0);
   }
@@ -244,32 +306,44 @@ export function ContentStudio() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Editor (7 cols) */}
         <div className="lg:col-span-7 space-y-5">
-          {/* Target Platforms Bar */}
+          {/* Target Accounts Bar — one toggle per connected account, since a
+              user can have more than one Page per platform */}
           <div className="p-4 rounded-lg bg-slate-900/80 border border-slate-800 space-y-2.5">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
               Publish Destinations
             </span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {PLATFORMS.map((p) => {
-                const Icon = p.icon;
-                const isSelected = selectedPlatforms.includes(p.id);
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => togglePlatform(p.id)}
-                    className={`flex items-center gap-2 p-2.5 rounded-md border text-xs font-semibold transition-all ${
-                      isSelected
-                        ? p.color
-                        : "border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700 hover:text-slate-300"
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{p.label}</span>
-                    {isSelected && <CheckIcon className="w-3.5 h-3.5 ml-auto" />}
-                  </button>
-                );
-              })}
-            </div>
+            {socialAccounts.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                No accounts connected yet.{" "}
+                <Link href="/dashboard/accounts" className="text-indigo-400 hover:text-indigo-300">
+                  Connect one
+                </Link>
+                .
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {socialAccounts.map((account) => {
+                  const platformMeta = PLATFORMS.find((p) => p.id === account.platform);
+                  const Icon = platformMeta?.icon || FacebookIcon;
+                  const isSelected = selectedAccountIds.includes(account.id);
+                  return (
+                    <button
+                      key={account.id}
+                      onClick={() => toggleAccount(account.id)}
+                      className={`flex items-center gap-2 p-2.5 rounded-md border text-xs font-semibold transition-all text-left ${
+                        isSelected
+                          ? platformMeta?.color || "text-slate-200 border-slate-600 bg-slate-800/60"
+                          : "border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700 hover:text-slate-300"
+                      }`}
+                    >
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{account.displayName}</span>
+                      {isSelected && <CheckIcon className="w-3.5 h-3.5 ml-auto shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Editor Body */}
@@ -410,7 +484,9 @@ export function ContentStudio() {
                           TP
                         </div>
                       </div>
-                      <span className="text-xs font-bold text-white">techpulse.studio</span>
+                      <span className="text-xs font-bold text-white">
+                        {previewAccount?.displayName || "Connect an Instagram account"}
+                      </span>
                     </div>
                     <span className="text-slate-500">•••</span>
                   </div>
@@ -455,7 +531,9 @@ export function ContentStudio() {
                       <span>✈️</span>
                     </div>
                     <p className="text-xs text-slate-200 line-clamp-3">
-                      <strong className="text-white mr-1.5">techpulse.studio</strong>
+                      <strong className="text-white mr-1.5">
+                        {previewAccount?.displayName || "your_account"}
+                      </strong>
                       {body || "Your Instagram caption and hashtags..."}
                     </p>
                   </div>
@@ -470,7 +548,9 @@ export function ContentStudio() {
                       TP
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-white">TechPulse Global</div>
+                      <div className="text-xs font-bold text-white">
+                        {previewAccount?.displayName || "Connect a Facebook Page"}
+                      </div>
                       <span className="text-[10px] text-slate-500">Public · Just now</span>
                     </div>
                   </div>
@@ -554,7 +634,10 @@ export function ContentStudio() {
       </div>
 
       {/* AI Assistant Modal */}
-      <AIModal onInsert={(text) => setBody((prev) => (prev ? `${prev}\n\n${text}` : text))} />
+      <AIModal
+        initialContent={body}
+        onInsert={(text) => setBody((prev) => (prev ? `${prev}\n\n${text}` : text))}
+      />
     </div>
   );
 }

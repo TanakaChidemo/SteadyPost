@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
 import { SparklesIcon, InstagramIcon, FacebookIcon, CheckIcon } from "./Icons";
 
-export function AIModal({ onInsert }) {
+export function AIModal({ onInsert, initialContent }) {
   const { isAiModalOpen, setAiModalOpen, addToast } = useAppStore();
   const [activeTab, setActiveTab] = useState("caption");
 
@@ -25,6 +25,18 @@ export function AIModal({ onInsert }) {
   const [repurposedOutputs, setRepurposedOutputs] = useState({});
 
   const [loading, setLoading] = useState(false);
+
+  // Carry whatever's already in Post Copy into the modal on open, so
+  // "Optimize with AI" builds on what's already written instead of asking
+  // "what is this about" as if starting from nothing.
+  useEffect(() => {
+    if (isAiModalOpen && initialContent) {
+      setTopic(initialContent);
+      setTagContent(initialContent);
+      setSourceContent(initialContent);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAiModalOpen]);
 
   if (!isAiModalOpen) return null;
 
@@ -144,7 +156,7 @@ export function AIModal({ onInsert }) {
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">
-                What is your post about?
+                {topic ? "Your post (edit to redirect the AI)" : "What is your post about?"}
               </label>
               <textarea
                 rows={3}

@@ -1,8 +1,15 @@
 const socialAccountModel = require("../models/socialAccount.model");
 
+// Page/IG access tokens are sensitive Graph API credentials — never ship them
+// to the browser. The frontend only needs to know whether an account is a
+// real Meta connection or a sandbox/demo one.
+function toClientAccount({ accessToken, ...rest }) {
+  return { ...rest, isLive: Boolean(accessToken) };
+}
+
 async function list(req, res) {
   const items = await socialAccountModel.list(req.user.id);
-  return res.json({ items });
+  return res.json({ items: items.map(toClientAccount) });
 }
 
 async function link(req, res) {
@@ -19,7 +26,7 @@ async function link(req, res) {
     displayName: name,
   });
 
-  return res.status(201).json(account);
+  return res.status(201).json(toClientAccount(account));
 }
 
 async function unlink(req, res) {

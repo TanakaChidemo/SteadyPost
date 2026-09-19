@@ -29,7 +29,7 @@ app.use(
 
 // Health check
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", service: "smp-backend", timestamp: new Date().toISOString() });
+  res.json({ status: "ok", service: "steadypost-backend", timestamp: new Date().toISOString() });
 });
 
 // OpenAPI docs (served from ../../docs/openapi.yaml)

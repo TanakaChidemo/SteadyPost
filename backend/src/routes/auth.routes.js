@@ -17,8 +17,12 @@ router.get("/oauth/google/callback", authController.handleGoogleOAuthCallback);
 
 // Social account linking
 router.post("/connect-mock", requireAuth, authController.connectMockAccount);
-router.get("/oauth/meta", requireAuth, authController.startMetaOAuth);
-router.get("/oauth/meta/callback", authController.handleMetaOAuthCallback);
+// The frontend completes the Meta login itself via the Facebook JS SDK
+// (FB.login with a Business Login config_id) and posts the resulting User
+// Access Token here — see frontend/lib/facebookSdk.js for why. Listing and
+// connecting are separate steps so the user can pick which Page to use.
+router.post("/oauth/meta/pages", requireAuth, authController.listMetaPages);
+router.post("/oauth/meta/connect", requireAuth, authController.connectMetaPage);
 router.get("/oauth/linkedin", requireAuth, authController.notImplemented);
 router.get("/oauth/twitter", requireAuth, authController.notImplemented);
 

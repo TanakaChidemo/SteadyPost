@@ -55,6 +55,28 @@ cp frontend/.env.local.example frontend/.env.local
 The defaults work out of the box — you don't need to change anything to
 get the app running.
 
+Each of these three files **must stay in the service directory it was
+copied into** — they can't be moved elsewhere or merged into one shared
+file, because each service's tooling only looks in its own directory:
+
+- **`backend/.env`** — read directly off disk by `dotenv` when the backend
+  process starts (`require("dotenv").config()` in `src/index.js`), and also
+  wired into the container as `env_file` in `docker-compose.yml`. Holds
+  `MONGODB_URI`, JWT secrets, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`,
+  `FRONTEND_URL`, and the optional Meta OAuth vars.
+- **`ai-service/.env`** — same idea, for the Flask service (`env_file` in
+  `docker-compose.yml`). Holds `GROQ_API_KEY` (and the optional
+  `OPENAI_API_KEY` fallback).
+- **`frontend/.env.local`** — Next.js only auto-loads `.env.local` from the
+  frontend project's own root; there's no `env_file` for it in
+  `docker-compose.yml` since `NEXT_PUBLIC_API_BASE_URL` is instead passed
+  directly via `environment:` there. This file matters when running the
+  frontend outside Docker (see "Running without Docker" below). Holds
+  `NEXT_PUBLIC_API_BASE_URL`.
+
+All three are gitignored — real values never get committed, only their
+`.env.example`/`.env.local.example` templates do.
+
 ### Optional: "Sign in with Google"
 
 Google login is optional — email/password sign-up works out of the box with

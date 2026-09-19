@@ -72,9 +72,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build backend image
-        run: docker build --target production -t smp-backend:${{ github.sha }} ./backend
+        run: docker build --target production -t steadypost-backend:${{ github.sha }} ./backend
       - name: Build frontend image
-        run: docker build --target production -t smp-frontend:${{ github.sha }} ./frontend
+        run: docker build --target production -t steadypost-frontend:${{ github.sha }} ./frontend
       - name: Build ai-service image
-        run: docker build --target production -t smp-ai-service:${{ github.sha }} ./ai-service
+        run: docker build --target production -t steadypost-ai-service:${{ github.sha }} ./ai-service
       # TODO: push to your registry (GHCR/ECR/Docker Hub) and trigger deploy step

@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const { z } = require("zod");
 const userModel = require("../models/user.model");
 const socialAccountModel = require("../models/socialAccount.model");
+const logger = require("../config/logger");
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "changeme_access_secret";
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "changeme_refresh_secret";
@@ -224,37 +225,123 @@ async function handleGoogleOAuthCallback(req, res) {
   }
 }
 
-async function startMetaOAuth(req, res) {
-  const stateToken = crypto
-    .createHmac("sha256", JWT_ACCESS_SECRET)
-    .update(`${req.user.id}:${Date.now()}`)
-    .digest("hex");
+const META_GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || "v20.0";
+const META_GRAPH_API_BASE = `https://graph.facebook.com/${META_GRAPH_API_VERSION}`;
 
-  const params = new URLSearchParams({
-    client_id: process.env.META_APP_ID || "demo_meta_app_id",
-    redirect_uri: process.env.META_REDIRECT_URI || "http://localhost:4000/api/v1/auth/oauth/meta/callback",
-    scope: "pages_manage_posts,pages_read_engagement,instagram_basic,instagram_content_publish",
-    response_type: "code",
-    state: `${req.user.id}_${stateToken}`,
-  });
+// /me/accounts only reflects classic, personal Page roles. A Page created
+// under (or added to) a Business Portfolio is "owned by" that portfolio
+// instead — the person's access is a Business Manager task assignment, which
+// /me/accounts never sees, even with pages_show_list granted and full
+// control in the Business Suite UI. For those, Pages have to be looked up
+// through the Business Portfolio itself (requires business_management).
+// Returns every accessible Page (deduped by id) — the caller decides which
+// one(s) to actually connect, rather than us silently picking one.
+async function findAccessiblePages(accessToken) {
+  const pagesById = new Map();
 
-  return res.redirect(`https://www.facebook.com/v20.0/dialog/oauth?${params.toString()}`);
-}
-
-async function handleMetaOAuthCallback(req, res) {
-  const { state } = req.query;
-  const userId = state ? state.split("_")[0] : null;
-
-  if (userId) {
-    await socialAccountModel.create({
-      ownerId: userId,
-      platform: "facebook",
-      externalAccountId: `fb_page_${Date.now()}`,
-      displayName: "Connected Facebook Page",
-    });
+  const pagesRes = await fetch(
+    `${META_GRAPH_API_BASE}/me/accounts?access_token=${encodeURIComponent(accessToken)}`
+  );
+  const pagesData = await pagesRes.json();
+  logger.info({ status: pagesRes.status, pagesData }, "Meta /me/accounts response");
+  if (pagesRes.ok && Array.isArray(pagesData.data)) {
+    for (const page of pagesData.data) pagesById.set(page.id, page);
   }
 
-  return res.redirect(`${FRONTEND_URL}/dashboard/accounts?connected=facebook`);
+  const businessesRes = await fetch(
+    `${META_GRAPH_API_BASE}/me/businesses?access_token=${encodeURIComponent(accessToken)}`
+  );
+  const businessesData = await businessesRes.json();
+  logger.info({ status: businessesRes.status, businessesData }, "Meta /me/businesses response");
+  if (businessesRes.ok && Array.isArray(businessesData.data)) {
+    for (const business of businessesData.data) {
+      const ownedPagesRes = await fetch(
+        `${META_GRAPH_API_BASE}/${business.id}/owned_pages?fields=id,name,category&access_token=${encodeURIComponent(accessToken)}`
+      );
+      const ownedPagesData = await ownedPagesRes.json();
+      logger.info(
+        { status: ownedPagesRes.status, businessId: business.id, ownedPagesData },
+        "Meta /{business}/owned_pages response"
+      );
+      if (ownedPagesRes.ok && Array.isArray(ownedPagesData.data)) {
+        for (const page of ownedPagesData.data) {
+          if (!pagesById.has(page.id)) pagesById.set(page.id, page);
+        }
+      }
+    }
+  }
+
+  return Array.from(pagesById.values());
+}
+
+// Facebook Login for Business's Page/asset picker only appears when the login
+// is triggered through the JS SDK's FB.login({ config_id }) — a plain
+// server-side redirect to the OAuth dialog never shows it. The frontend
+// calls FB.login() itself and hands us the resulting User Access Token.
+//
+// Step 1: list every Page the token can see, so the frontend can show a
+// picker instead of us guessing which one the person wants connected.
+async function listMetaPages(req, res) {
+  const { accessToken } = req.body;
+  if (!accessToken) {
+    return res.status(400).json({ error: "accessToken is required" });
+  }
+
+  try {
+    const pages = await findAccessiblePages(accessToken);
+    return res.json({
+      pages: pages.map((page) => ({ id: page.id, name: page.name, category: page.category || null })),
+    });
+  } catch (err) {
+    logger.error({ err: err.message }, "Meta page listing failed");
+    return res.status(502).json({ error: "oauth_failed" });
+  }
+}
+
+// Step 2: connect the one Page the user actually picked (plus its linked
+// Instagram Business account, if any). requireAuth gives us the owner via
+// the JWT, so there's no need for a signed-state round trip a redirect-based
+// flow would otherwise need.
+async function connectMetaPage(req, res) {
+  const { accessToken, pageId } = req.body;
+  if (!accessToken || !pageId) {
+    return res.status(400).json({ error: "accessToken and pageId are required" });
+  }
+
+  try {
+    const pageRes = await fetch(
+      `${META_GRAPH_API_BASE}/${pageId}?fields=id,name,access_token,instagram_business_account{id,username}&access_token=${encodeURIComponent(accessToken)}`
+    );
+    const page = await pageRes.json();
+    logger.info({ status: pageRes.status, pageId: page.id }, "Meta Page connect lookup");
+    if (!pageRes.ok || !page.access_token) {
+      return res.status(422).json({ error: "no_facebook_page_found" });
+    }
+
+    await socialAccountModel.create({
+      ownerId: req.user.id,
+      platform: "facebook",
+      externalAccountId: page.id,
+      displayName: page.name || "Connected Facebook Page",
+      accessToken: page.access_token,
+    });
+
+    const igAccount = page.instagram_business_account;
+    if (igAccount) {
+      await socialAccountModel.create({
+        ownerId: req.user.id,
+        platform: "instagram",
+        externalAccountId: igAccount.id,
+        displayName: igAccount.username ? `@${igAccount.username}` : "Connected Instagram Account",
+        accessToken: page.access_token,
+      });
+    }
+
+    return res.json({ connected: igAccount ? ["facebook", "instagram"] : ["facebook"] });
+  } catch (err) {
+    logger.error({ err: err.message }, "Meta Page connect failed");
+    return res.status(502).json({ error: "oauth_failed" });
+  }
 }
 
 async function connectMockAccount(req, res) {
@@ -286,8 +373,8 @@ module.exports = {
   logout,
   startGoogleOAuth,
   handleGoogleOAuthCallback,
-  startMetaOAuth,
-  handleMetaOAuthCallback,
+  listMetaPages,
+  connectMetaPage,
   connectMockAccount,
   notImplemented,
 };
