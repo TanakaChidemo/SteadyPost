@@ -11,22 +11,94 @@ export const apiClient = axios.create({
   timeout: 10000,
 });
 
+export function getAccessToken() {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem("accessToken");
+}
+
+export function getRefreshToken() {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem("refreshToken");
+}
+
+export function setTokens({ accessToken, refreshToken } = {}) {
+  if (typeof window === "undefined") return;
+  if (accessToken) window.localStorage.setItem("accessToken", accessToken);
+  if (refreshToken) window.localStorage.setItem("refreshToken", refreshToken);
+}
+
+export function clearTokens() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("accessToken");
+  window.localStorage.removeItem("refreshToken");
+}
+
 apiClient.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    const token = window.localStorage.getItem("accessToken");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+  const token = getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
 
+// Access tokens expire after 15 minutes (see backend JWT_ACCESS_EXPIRY). Rather
+// than let every request 401 once that happens, transparently swap in a fresh
+// access token via the refresh token and retry — only falling back to
+// "session-expired" (dispatched for AuthHydrator to catch) when the refresh
+// token itself is missing or no longer valid.
+let refreshPromise = null;
+
+function refreshAccessToken() {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    return Promise.reject(new Error("No refresh token available"));
+  }
+
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post(`${API_BASE_URL}/auth/refresh`, { refreshToken })
+      .then((res) => {
+        setTokens({ accessToken: res.data.accessToken });
+        return res.data.accessToken;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     // If backend is not running, provide graceful structured error
     if (!error.response) {
       return Promise.reject(new Error("Network connection to backend server failed"));
+    }
+
+    const { config, response } = error;
+    const isAuthEndpoint = /\/auth\/(login|register|refresh)$/.test(config?.url || "");
+
+    if (response.status === 401 && config && !config._retry && !isAuthEndpoint) {
+      // No refresh token on hand means the user was never logged in (or is
+      // already fully logged out) — behave exactly as before, no refresh
+      // attempt and no session-expired noise.
+      if (!getRefreshToken()) {
+        return Promise.reject(error);
+      }
+
+      config._retry = true;
+      try {
+        const newAccessToken = await refreshAccessToken();
+        config.headers = { ...config.headers, Authorization: `Bearer ${newAccessToken}` };
+        return apiClient(config);
+      } catch (refreshErr) {
+        clearTokens();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("steadypost:session-expired"));
+        }
+        return Promise.reject(error);
+      }
     }
 
     return Promise.reject(error);

@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppStore } from "../../../lib/store";
-import { api } from "../../../lib/apiClient";
+import { api, setTokens, clearTokens } from "../../../lib/apiClient";
 import { SparklesIcon } from "../../../components/Icons";
 
 export default function AuthCallbackPage() {
@@ -18,6 +18,7 @@ export default function AuthCallbackPage() {
 
     const error = searchParams.get("error");
     const accessToken = searchParams.get("accessToken");
+    const refreshToken = searchParams.get("refreshToken");
 
     if (error || !accessToken) {
       addToast("error", error ? `Google sign-in failed: ${error}` : "Google sign-in failed");
@@ -25,16 +26,16 @@ export default function AuthCallbackPage() {
       return;
     }
 
-    window.localStorage.setItem("accessToken", accessToken);
+    setTokens({ accessToken, refreshToken });
     api.auth
       .me()
       .then((res) => {
-        setUser(res.user, accessToken);
+        setUser(res.user, accessToken, refreshToken);
         addToast("success", `Welcome, ${res.user.name}!`);
         router.replace("/dashboard");
       })
       .catch(() => {
-        window.localStorage.removeItem("accessToken");
+        clearTokens();
         addToast("error", "Google sign-in failed");
         router.replace("/");
       });

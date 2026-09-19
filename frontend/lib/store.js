@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "./apiClient";
+import { api, getAccessToken, getRefreshToken, setTokens, clearTokens } from "./apiClient";
 
 export const useAppStore = create((set, get) => ({
   user: null,
@@ -20,35 +20,46 @@ export const useAppStore = create((set, get) => ({
 
   hydrate: async () => {
     if (typeof window === "undefined") return;
-    const token = window.localStorage.getItem("accessToken");
+    const token = getAccessToken() || getRefreshToken();
     if (!token) {
       set({ authReady: true });
       return;
     }
     try {
+      // If the access token has expired, apiClient's response interceptor
+      // transparently refreshes it (via the stored refresh token) and
+      // retries this call, so this only throws once both are invalid.
       const { user } = await api.auth.me();
-      set({ user, token, authReady: true });
+      set({ user, token: getAccessToken(), authReady: true });
     } catch (err) {
-      window.localStorage.removeItem("accessToken");
+      clearTokens();
       set({ user: null, token: null, authReady: true });
     }
   },
 
-  setUser: (user, token) => {
-    if (token !== undefined && typeof window !== "undefined") {
-      if (token) {
-        window.localStorage.setItem("accessToken", token);
+  setUser: (user, accessToken, refreshToken) => {
+    if (accessToken !== undefined) {
+      if (accessToken) {
+        setTokens({ accessToken, refreshToken });
       } else {
-        window.localStorage.removeItem("accessToken");
+        clearTokens();
       }
     }
-    set({ user, token: token !== undefined ? token : get().token, authReady: true });
+    set({ user, token: accessToken !== undefined ? accessToken : get().token, authReady: true });
+  },
+
+  // Resets auth state after the refresh token itself has expired or been
+  // rejected (see apiClient's "steadypost:session-expired" event) — as
+  // opposed to logout(), this doesn't imply the user asked to sign out.
+  expireSession: () => {
+    clearTokens();
+    set({ user: null, token: null });
+    get().addToast("error", "Your session expired — please sign in again");
+    get().setAuthModalOpen(true);
   },
 
   logout: () => {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem("accessToken");
-    }
+    clearTokens();
     set({ user: null, token: null });
     get().addToast("info", "Signed out successfully");
   },

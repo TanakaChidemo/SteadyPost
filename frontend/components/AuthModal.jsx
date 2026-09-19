@@ -24,11 +24,11 @@ export function AuthModal() {
     try {
       if (isRegister) {
         const res = await api.auth.register({ email, password, name });
-        setUser(res.user, res.accessToken);
+        setUser(res.user, res.accessToken, res.refreshToken);
         addToast("success", `Welcome aboard, ${res.user.name}!`);
       } else {
         const res = await api.auth.login({ email, password });
-        setUser(res.user, res.accessToken);
+        setUser(res.user, res.accessToken, res.refreshToken);
         addToast("success", `Welcome back, ${res.user.name}!`);
       }
       setAuthModalOpen(false);
