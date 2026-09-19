@@ -62,19 +62,24 @@ docs/           Architecture, OpenAPI spec
 
 ## First-time setup
 
-1. Copy environment files:
+1. Clone the repo:
+   ```bash
+   git clone https://github.com/TanakaChidemo/SteadyPost.git
+   cd SteadyPost
+   ```
+2. Copy environment files:
    ```bash
    cp backend/.env.example backend/.env
    cp ai-service/.env.example ai-service/.env
    cp frontend/.env.local.example frontend/.env.local
    ```
-2. Paste your Groq key into `ai-service/.env` (`GROQ_API_KEY=gsk_...`). This
+3. Paste your Groq key into `ai-service/.env` (`GROQ_API_KEY=gsk_...`). This
    is the only secret you need — everything else has a working default.
-3. Start everything:
+4. Start everything:
    ```bash
    docker compose up --build
    ```
-4. Open:
+5. Open:
    - Frontend: http://localhost:3000
    - Backend health: http://localhost:4000/health
    - API docs (Swagger UI): http://localhost:4000/api/docs
