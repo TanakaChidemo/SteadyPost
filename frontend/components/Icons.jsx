@@ -162,3 +162,12 @@ export function ArrowUpRightIcon({ className = "w-5 h-5" }) {
     </svg>
   );
 }
+
+// Pair with the `animate-spin` Tailwind class on the caller's className.
+export function SpinnerIcon({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M12 3a9 9 0 1 0 9 9" opacity="0.9" />
+    </svg>
+  );
+}

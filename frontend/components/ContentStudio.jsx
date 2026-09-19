@@ -13,6 +13,7 @@ import {
   SendIcon,
   CheckIcon,
   LayersIcon,
+  SpinnerIcon,
 } from "./Icons";
 import { AIModal } from "./AIModal";
 
@@ -42,6 +43,11 @@ export function ContentStudio() {
   const [previewPlatform, setPreviewPlatform] = useState("instagram");
   const [previewMediaIndex, setPreviewMediaIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  // Publishing is async on the backend (submit -> poll for a result per
+  // platform), so this names which stage is in flight for the button label —
+  // otherwise a multi-second publish just looks like the click did nothing.
+  const [publishStage, setPublishStage] = useState("");
 
   // Draft metadata still stores platform *types* (instagram/facebook), not
   // specific accounts — derive that list from whatever's currently selected.
@@ -158,7 +164,8 @@ export function ContentStudio() {
       return addToast("error", "Connect a social account first — see the Social Accounts page.");
     }
 
-    setLoading(true);
+    setPublishing(true);
+    setPublishStage("Submitting…");
     try {
       let draftId = activeDraft?._id;
       if (!draftId) {
@@ -184,6 +191,7 @@ export function ContentStudio() {
         submissions.push({ account, postId });
       }
 
+      setPublishStage("Publishing…");
       const results = await Promise.all(
         submissions.map(async (s) => ({ ...s, result: await api.publish.waitForResult(s.postId) }))
       );
@@ -203,7 +211,8 @@ export function ContentStudio() {
     } catch (err) {
       addToast("error", err.message || "Publishing failed");
     } finally {
-      setLoading(false);
+      setPublishing(false);
+      setPublishStage("");
     }
   }
 
@@ -293,11 +302,20 @@ export function ContentStudio() {
 
           <button
             onClick={handlePublishNow}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
+            disabled={loading || publishing}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <SendIcon className="w-4 h-4" />
-            <span>Publish Now</span>
+            {publishing ? (
+              <>
+                <SpinnerIcon className="w-4 h-4 animate-spin" />
+                <span>{publishStage || "Publishing…"}</span>
+              </>
+            ) : (
+              <>
+                <SendIcon className="w-4 h-4" />
+                <span>Publish Now</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -430,10 +448,10 @@ export function ContentStudio() {
             <div className="flex items-center justify-between pt-2 border-t border-slate-800">
               <button
                 onClick={handleSaveDraft}
-                disabled={loading}
-                className="px-4 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition"
+                disabled={loading || publishing}
+                className="px-4 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Save as Draft
+                {loading ? "Saving…" : "Save as Draft"}
               </button>
 
               <button
