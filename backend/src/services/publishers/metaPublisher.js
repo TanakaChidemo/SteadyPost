@@ -66,22 +66,90 @@ async function publish({ platform, postId, content, mediaUrls = [], socialAccoun
   throw new Error(`metaPublisher does not support platform: ${platform}`);
 }
 
+// Uploaded media never leaves this server (no object storage — see
+// content.controller.js), so mediaUrls[0] is normally a data: URI, not
+// something Facebook's servers can fetch on their own. Graph API's `url`
+// param requires a publicly reachable link; its `source` param (raw file
+// bytes over multipart) doesn't, so that's what we use whenever the media
+// is a data: URI. A real http(s) URL (e.g. from a future object-storage
+// integration) still goes through `url` as before.
+function parseDataUrl(dataUrl) {
+  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl || "");
+  if (!match) return null;
+  const [, mimeType, base64] = match;
+  return { mimeType, buffer: Buffer.from(base64, "base64") };
+}
+
+// Uploads one photo to the Page's /photos endpoint. `published: false` stages
+// it as an unpublished photo for later use in a multi-photo feed post instead
+// of posting it standalone.
+async function uploadFacebookPhoto({ account, mediaUrl, published, caption }) {
+  const media = parseDataUrl(mediaUrl);
+
+  let response;
+  if (media) {
+    const form = new FormData();
+    form.append("access_token", account.pageAccessToken);
+    form.append("published", String(published));
+    if (caption) form.append("caption", caption);
+    form.append("source", new Blob([media.buffer], { type: media.mimeType }), "upload");
+    response = await fetch(`${GRAPH_API_BASE}/${account.pageId}/photos`, { method: "POST", body: form });
+  } else {
+    response = await fetch(`${GRAPH_API_BASE}/${account.pageId}/photos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: mediaUrl,
+        published,
+        ...(caption ? { caption } : {}),
+        access_token: account.pageAccessToken,
+      }),
+    });
+  }
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(`Facebook photo upload failed: ${JSON.stringify(result)}`);
+  }
+  return result;
+}
+
 async function publishToFacebookPage({ account, content, mediaUrls, postId }) {
-  const endpoint =
-    mediaUrls.length > 0
-      ? `${GRAPH_API_BASE}/${account.pageId}/photos`
-      : `${GRAPH_API_BASE}/${account.pageId}/feed`;
+  let response;
 
-  const body =
-    mediaUrls.length > 0
-      ? { url: mediaUrls[0], caption: content, access_token: account.pageAccessToken }
-      : { message: content, access_token: account.pageAccessToken };
+  if (mediaUrls.length === 0) {
+    response = await fetch(`${GRAPH_API_BASE}/${account.pageId}/feed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: content, access_token: account.pageAccessToken }),
+    });
+  } else if (mediaUrls.length === 1) {
+    const photo = await uploadFacebookPhoto({
+      account,
+      mediaUrl: mediaUrls[0],
+      published: true,
+      caption: content,
+    });
+    return { platform: "facebook", externalId: photo.id || photo.post_id, raw: photo };
+  } else {
+    // A single /photos call only ever attaches one image. For multiple
+    // photos, each has to be uploaded unpublished first, then referenced
+    // together from one /feed post via attached_media — otherwise every
+    // photo past the first is silently dropped from the post.
+    const photos = await Promise.all(
+      mediaUrls.map((mediaUrl) => uploadFacebookPhoto({ account, mediaUrl, published: false }))
+    );
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+    response = await fetch(`${GRAPH_API_BASE}/${account.pageId}/feed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: content,
+        attached_media: photos.map((photo) => ({ media_fbid: photo.id })),
+        access_token: account.pageAccessToken,
+      }),
+    });
+  }
 
   const result = await response.json();
   if (!response.ok) {
