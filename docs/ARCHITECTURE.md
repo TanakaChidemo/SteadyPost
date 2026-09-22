@@ -10,11 +10,10 @@
                                │                          │
                                ▼                          ▼
                      ┌──────────────────┐          ┌──────────┐
-                     │ In-memory store  │          │  Groq /  │
-                     │ (data/store.js)  │          │  OpenAI  │
-                     │ users, accounts, │          └──────────┘
-                     │ drafts, posts    │
-                     └──────────────────┘
+                     │ MongoDB          │          │  Groq /  │
+                     │ users, accounts, │          │  OpenAI  │
+                     │ drafts, posts    │          └──────────┘
+                     └────────┬─────────┘
                                │
                                ▼
                      ┌──────────────────────┐
@@ -24,42 +23,78 @@
                      └──────────────────────┘
 ```
 
-## No database, on purpose
+## Auth and social-account connect
 
-The app's core workflow is **log in, write a post (optionally with AI
-help), attach media, publish it**. There is no Postgres, no MongoDB, no
-Redis. All application data (users, social accounts, content drafts,
-publish-status records) lives in plain JS arrays in
-[`backend/src/data/store.js`](../backend/src/data/store.js), seeded with a
-few demo records at process start and mutated directly by the controllers.
-Restarting the backend resets everything.
+App login and Meta account linking are two hops through the same three
+blocks. Google (or email) signs the user into SteadyPost; Meta never does.
+The JWT from hop 1 is what authorizes hop 2.
 
-This is a real trade-off, not just a simplification for its own sake:
-nothing survives a restart, there's no relational integrity enforcement,
-and every "query" is a linear array scan. That's fine at this scale and
-lets the whole data layer be read and explained as one small file. If the
-project later needs data to survive restarts or be shared across multiple
-backend instances, that file is the seam to swap out for a real database.
+```mermaid
+flowchart LR
+  FE[Frontend]
+  API[Backend]
+  DB[(MongoDB)]
+
+  FE -->|"1. Google / email login"| API
+  API -->|"users + JWT"| DB
+  FE -->|"2. FB.login + JWT"| API
+  API -->|"Page token on socialaccounts"| DB
+```
+
+1. The frontend signs the user in (Google authorization-code OAuth, or
+   email/password). The backend writes the **user** and issues JWTs
+   (access 15m, refresh 7d). Tokens live in `localStorage`.
+2. With that JWT, the frontend runs Facebook Login for Business
+   (`FB.login({ config_id })` in [`frontend/lib/facebookSdk.js`](../frontend/lib/facebookSdk.js)).
+   The backend lists Pages via Graph (`/me/accounts`, `/me/businesses`,
+   `/{business}/owned_pages`), then stores the **Page access token** on
+   `socialaccounts`. A linked Instagram Business account is saved as a
+   second row using the same Page token. The browser never sees that token
+   (`isLive` is sent instead).
+
+Google login: `GET /api/v1/auth/oauth/google` → Google →
+`GET /api/v1/auth/oauth/google/callback` → redirect to `/auth/callback`
+with SteadyPost JWTs.
+
+Meta connect: `POST /api/v1/auth/oauth/meta/pages` then
+`POST /api/v1/auth/oauth/meta/connect`. Requires a live JWT plus
+`NEXT_PUBLIC_META_APP_ID` / `NEXT_PUBLIC_META_LOGIN_CONFIG_ID`. Without
+those, the UI can still attach a sandbox account with no token.
+
+## Data layer
+
+Users, social accounts, content drafts, and publish-status records live in
+MongoDB (`MONGODB_URI`), via the Mongoose models under
+[`backend/src/models/`](../backend/src/models/). A demo user, two sandbox
+social accounts, and a sample draft are seeded once at boot
+([`backend/src/data/seed.js`](../backend/src/data/seed.js)) if they do not
+already exist.
+
+The publish *job* itself is still in-process (`setImmediate` in
+`src/queue/`) — there is no Redis/Bull. Restarting the backend does not
+wipe MongoDB, but it does drop any publish job that was mid-flight.
 
 ## Publishing engine flow
 
-1. User hits `/publish/now` with a `contentDraftId` and `platform`.
-2. Backend looks up the draft in `data/store.js`, appends a row to the
-   in-memory `scheduledPosts` array with status `publishing`, and schedules
-   an in-memory publish job (`src/queue/`) with zero delay.
+1. User hits `/publish/now` with a `contentDraftId`, `platform`, and
+   optional `socialAccountId`.
+2. Backend looks up the draft, inserts a `scheduledposts` row with status
+   `publishing`, and schedules an in-process publish job (`src/queue/`)
+   with zero delay.
 3. The same backend process picks up the job via `setImmediate` and
    dispatches to the platform-specific publisher
    (`src/services/publishers/metaPublisher.js`).
-4. `metaPublisher` only calls the real Facebook/Instagram Graph API if
-   `META_APP_ID` is configured; otherwise ("sandbox mode", the default) it
-   simulates a successful publish and returns a fake external post ID.
+4. `metaPublisher` calls the real Facebook/Instagram Graph API only if
+   `META_APP_ID` is set *and* a `socialAccountId` is provided; otherwise
+   ("sandbox mode") it simulates a successful publish and returns a fake
+   external post ID. Live publishes use the stored Page access token.
 5. The job processor writes the result (`published`/`failed`,
-   `externalPostId`, `errorMessage`) back onto the same in-memory
-   `scheduledPosts` row, which `/publish/status/:id` reads back.
+   `externalPostId`, `errorMessage`) back onto the same `scheduledposts`
+   row, which `/publish/status/:id` reads back.
 
-Because everything here is in-memory and synchronous-ish (zero delay), this
-flow is really "publish now" with an async-shaped API — there's no
-scheduled/delayed publishing exposed in the UI or API.
+Because the job delay is zero, this flow is really "publish now" with an
+async-shaped API — there's no scheduled/delayed publishing exposed in the
+UI or API.
 
 ## AI microservice boundary
 
@@ -87,12 +122,10 @@ page refresh: it was never written anywhere durable.
 
 ## Known limitations (intentional at this stage)
 
-- No persistence: restarting the backend wipes users, accounts, drafts, and
-  publish history back to the seed data.
-- No real Meta OAuth: social accounts are two hardcoded demo entries, and
-  "connecting" a new one just appends to the in-memory list with a fake
-  token.
 - No object storage for uploaded media (base64 in memory only).
+- Publish jobs are in-process only; a backend restart drops in-flight
+  publishes (MongoDB rows survive).
+- Sandbox social accounts (no Page token) cannot hit the real Graph API.
 - Only Facebook and Instagram are supported anywhere in the app (AI
   generation, publish destinations).
 - No test suites yet beyond CI placeholders.
