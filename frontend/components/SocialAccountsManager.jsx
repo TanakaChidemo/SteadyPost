@@ -367,7 +367,7 @@ export function SocialAccountsManager() {
 
                 <p className="text-[11px] text-slate-500 mb-3">
                   No real Meta app configured on this server? Link a demo account by name instead — it
-                  won't be able to publish to the real Graph API.
+                  will not be able to publish to the real Graph API.
                 </p>
 
                 <form onSubmit={handleConnect} className="space-y-4">

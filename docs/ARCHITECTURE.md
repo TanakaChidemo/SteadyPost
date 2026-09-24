@@ -11,7 +11,7 @@
                                ▼                          ▼
                      ┌──────────────────┐          ┌──────────┐
                      │ MongoDB          │          │  Groq /  │
-                     │ users, accounts, │          │  OpenAI  │
+                     │ users, accounts, │          │  Gemini  │
                      │ drafts, posts    │          └──────────┘
                      └────────┬─────────┘
                                │
