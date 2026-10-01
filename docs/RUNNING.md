@@ -3,15 +3,17 @@
 This is a step-by-step guide to get the app running locally, including the
 gotchas that aren't obvious from a first read of the README.
 
-There is no database to set up. All data (users, social accounts, drafts)
-is hardcoded in `backend/src/data/store.js` and lives only in memory — it
-resets every time the backend restarts.
+The backend requires MongoDB (`MONGODB_URI` in `backend/.env`). Users,
+social accounts, drafts, and publish-status records persist across
+restarts. A demo user, two sandbox social accounts, and a sample draft are
+seeded once at boot if they do not already exist
+([`backend/src/data/seed.js`](../backend/src/data/seed.js)).
 
 ## 1. Prerequisites
 
-You need **Docker** and the **Docker Compose plugin**. That's it — the Node
-backend, the Python AI service, and the Next.js frontend all run in
-containers.
+You need **Docker** and the **Docker Compose plugin**, plus a MongoDB
+URI in `backend/.env`. The Node backend, the Python AI service, and the
+Next.js frontend all run in containers.
 
 ### Installing Docker
 
@@ -52,8 +54,8 @@ cp backend/.env.example backend/.env
 cp ai-service/.env.example ai-service/.env
 cp frontend/.env.local.example frontend/.env.local
 ```
-The defaults work out of the box — you don't need to change anything to
-get the app running.
+The defaults work for JWT secrets and ports — you still must set a real
+`MONGODB_URI` in `backend/.env`. Groq, Google, and Meta are optional.
 
 Each of these three files **must stay in the service directory it was
 copied into** — they can't be moved elsewhere or merged into one shared
@@ -72,7 +74,8 @@ file, because each service's tooling only looks in its own directory:
   `docker-compose.yml` since `NEXT_PUBLIC_API_BASE_URL` is instead passed
   directly via `environment:` there. This file matters when running the
   frontend outside Docker (see "Running without Docker" below). Holds
-  `NEXT_PUBLIC_API_BASE_URL`.
+  `NEXT_PUBLIC_API_BASE_URL`, and optionally `NEXT_PUBLIC_META_APP_ID` /
+  `NEXT_PUBLIC_META_LOGIN_CONFIG_ID` for live Meta connect.
 
 All three are gitignored — real values never get committed, only their
 `.env.example`/`.env.local.example` templates do.
@@ -109,6 +112,24 @@ completes. If you've changed the frontend's port mapping in
 already using port 3000 — update `FRONTEND_URL` to match, or Google login
 will silently redirect you into whatever else is running on the old port
 instead of this app.
+
+### Optional: real Meta connect
+
+Leave the Meta vars blank to keep Social Accounts in sandbox mode (link a
+demo Page by name; publish is simulated). For a live Facebook/Instagram
+connection:
+
+1. Create a Facebook Login for Business configuration and paste its ID, plus
+   the app ID, as described in [`backend/.env.example`](../backend/.env.example)
+   (`META_APP_ID`, `META_LOGIN_CONFIG_ID`). The Page must belong to a
+   Business Portfolio.
+2. Mirror the public values in `frontend/.env.local`:
+   ```
+   NEXT_PUBLIC_META_APP_ID=...
+   NEXT_PUBLIC_META_LOGIN_CONFIG_ID=...
+   ```
+The login itself runs in the browser (`FB.login`); the backend only lists
+Pages via Graph and stores the Page access token.
 
 ### Optional: real AI generation
 
@@ -176,10 +197,6 @@ docker compose run --rm -e NODE_ENV=production frontend npm run build
 This doesn't affect normal usage — `docker compose up` (dev mode) and CI
 (which never sets `NODE_ENV`) are both unaffected.
 
-**I restarted the backend and my drafts/accounts are gone** — that's
-expected. Nothing is persisted at this stage of the project; restarting
-resets everything back to the seed data in `backend/src/data/store.js`.
-
 ## Stopping everything
 
 ```bash
@@ -189,5 +206,5 @@ docker compose down
 ## Running without Docker
 
 Only needed for editor tooling/IntelliSense — see the README's
-"Running services individually" section. You'll need Node.js 20+ and
-Python 3.12+. No database installs required.
+"Running services individually" section. You'll need Node.js 20+,
+Python 3.12+, and a reachable MongoDB (`MONGODB_URI` in `backend/.env`).

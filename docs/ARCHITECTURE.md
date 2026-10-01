@@ -11,7 +11,7 @@
                                ▼                          ▼
                      ┌──────────────────┐          ┌──────────┐
                      │ MongoDB          │          │  Groq /  │
-                     │ users, accounts, │          │  Gemini  │
+                     │ users, accounts, │          │  OpenAI  │
                      │ drafts, posts    │          └──────────┘
                      └────────┬─────────┘
                                │
@@ -142,6 +142,12 @@ page refresh: it was never written anywhere durable.
 - Publish jobs are in-process only; a backend restart drops in-flight
   publishes (MongoDB rows survive).
 - Sandbox social accounts (no Page token) cannot hit the real Graph API.
+- Dashboard quick publish (`frontend/app/dashboard/page.jsx`) omits
+  `socialAccountId`, so that path always uses the sandbox simulator.
+- Live Instagram publish sends `image_url`; uploads in this app are `data:`
+  URLs, which Graph cannot fetch. Facebook `/photos` already uploads those
+  as multipart `source`.
 - Only Facebook and Instagram are supported anywhere in the app (AI
   generation, publish destinations).
-- No test suites yet beyond CI placeholders.
+- Automated tests are thin: backend has a health check
+  (`backend/tests/health.test.js`); CI also lints and builds the frontend.
