@@ -23,43 +23,59 @@
                      └──────────────────────┘
 ```
 
-## Auth and social-account connect
+## OAuth login (app identity)
 
-App login and Meta account linking are two hops through the same three
-blocks. Google (or email) signs the user into SteadyPost; Meta never does.
-The JWT from hop 1 is what authorizes hop 2.
+Google (or email/password) signs the user into SteadyPost. Meta is not
+involved. The backend never sends Google's tokens to the browser — only
+SteadyPost JWTs.
 
 ```mermaid
 flowchart LR
   FE[Frontend]
   API[Backend]
+  G[Google]
   DB[(MongoDB)]
 
-  FE -->|"1. Google / email login"| API
-  API -->|"users + JWT"| DB
-  FE -->|"2. FB.login + JWT"| API
-  API -->|"Page token on socialaccounts"| DB
+  FE -->|sign in| API
+  API -->|authorization code| G
+  G -->|profile| API
+  API -->|users + JWT| DB
 ```
 
-1. The frontend signs the user in (Google authorization-code OAuth, or
-   email/password). The backend writes the **user** and issues JWTs
-   (access 15m, refresh 7d). Tokens live in `localStorage`.
-2. With that JWT, the frontend runs Facebook Login for Business
-   (`FB.login({ config_id })` in [`frontend/lib/facebookSdk.js`](../frontend/lib/facebookSdk.js)).
-   The backend lists Pages via Graph (`/me/accounts`, `/me/businesses`,
-   `/{business}/owned_pages`), then stores the **Page access token** on
-   `socialaccounts`. A linked Instagram Business account is saved as a
-   second row using the same Page token. The browser never sees that token
-   (`isLive` is sent instead).
+The frontend starts `GET /api/v1/auth/oauth/google`. The backend redirects
+to Google, exchanges the code on `GET /api/v1/auth/oauth/google/callback`,
+creates or links the user, and redirects to `/auth/callback` with access
+(15m) and refresh (7d) JWTs. Those tokens live in `localStorage`. Email
+login is the same end state via `POST /api/v1/auth/login`.
 
-Google login: `GET /api/v1/auth/oauth/google` → Google →
-`GET /api/v1/auth/oauth/google/callback` → redirect to `/auth/callback`
-with SteadyPost JWTs.
+## Meta Graph API (social-account connect)
 
-Meta connect: `POST /api/v1/auth/oauth/meta/pages` then
-`POST /api/v1/auth/oauth/meta/connect`. Requires a live JWT plus
-`NEXT_PUBLIC_META_APP_ID` / `NEXT_PUBLIC_META_LOGIN_CONFIG_ID`. Without
-those, the UI can still attach a sandbox account with no token.
+This hop requires an existing JWT from login above. Facebook Login for
+Business runs in the browser (`FB.login({ config_id })` in
+[`frontend/lib/facebookSdk.js`](../frontend/lib/facebookSdk.js)); the backend
+only talks to Graph and stores the Page token.
+
+```mermaid
+flowchart LR
+  FE[Frontend]
+  API[Backend]
+  M[Meta Graph]
+  DB[(MongoDB)]
+
+  FE -->|FB.login + JWT| API
+  API -->|list / connect Pages| M
+  M -->|Page token| API
+  API -->|socialaccounts| DB
+```
+
+`POST /api/v1/auth/oauth/meta/pages` lists Pages (`/me/accounts`,
+`/me/businesses`, `/{business}/owned_pages`). `POST /api/v1/auth/oauth/meta/connect`
+loads `/{pageId}` and stores the **Page access token** on `socialaccounts`.
+A linked Instagram Business account is a second row with the same token.
+The browser never sees that token (`isLive` is sent instead). Requires
+`NEXT_PUBLIC_META_APP_ID` / `NEXT_PUBLIC_META_LOGIN_CONFIG_ID`; otherwise
+the UI can attach a sandbox account with no token. Live publish later
+reuses the stored Page token against `/feed`, `/photos`, or IG `/media`.
 
 ## Data layer
 
