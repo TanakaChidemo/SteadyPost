@@ -26,7 +26,7 @@ const PLATFORM_STYLES = {
 async function forwardToAiService(path, body) {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 16000);
 
     const response = await fetch(`${AI_SERVICE_URL}${path}`, {
       method: "POST",
@@ -66,6 +66,16 @@ async function generateCaption(req, res) {
     caption,
     model: "steadypost-ai-engine-v2",
     tone,
+    candidates: [
+      {
+        provider: "local",
+        label: "SteadyPost Fallback Engine",
+        model: "steadypost-ai-engine-v2",
+        caption,
+        status: "success",
+        error: null,
+      },
+    ],
   });
 }
 
