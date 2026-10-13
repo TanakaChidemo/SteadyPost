@@ -28,7 +28,12 @@ def _get_active_model_and_client():
     if _is_configured(groq_key):
         try:
             model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
-            return OpenAI(api_key=groq_key, base_url="https://api.groq.com/openai/v1", timeout=12.0), model
+            client = OpenAI(
+                api_key=groq_key,
+                base_url="https://api.groq.com/openai/v1",
+                timeout=12.0,
+            )
+            return client, model
         except Exception:
             pass
 
@@ -211,7 +216,10 @@ def generate_caption(topic: str, platform: str = "instagram", tone: str = "casua
     messages = [
         {
             "role": "system",
-            "content": f"You are a social media copywriter. Write for {platform}: {constraint}. Tone: {tone}.",
+            "content": (
+                f"You are a social media copywriter. Write for {platform}: "
+                f"{constraint}. Tone: {tone}."
+            ),
         },
         {"role": "user", "content": f"Write a caption about: {topic}"},
     ]
@@ -243,7 +251,10 @@ def generate_caption(topic: str, platform: str = "instagram", tone: str = "casua
     candidates = [candidates_by_name[name] for name, _ in providers if name in candidates_by_name]
 
     # Select the first successfully generated caption for backward compatibility
-    successful_candidate = next((c for c in candidates if c.get("status") == "success" and c.get("caption")), None)
+    successful_candidate = next(
+        (c for c in candidates if c.get("status") == "success" and c.get("caption")),
+        None,
+    )
 
     if successful_candidate:
         primary_caption = successful_candidate["caption"]
