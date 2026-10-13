@@ -1,9 +1,10 @@
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dotenv import load_dotenv
 from openai import OpenAI
 
-_client = None
-_chat_model = None
+load_dotenv()
 
 PLATFORM_CONSTRAINTS = {
     "twitter": "under 280 characters, punchy, no more than 2 hashtags",
@@ -13,96 +14,271 @@ PLATFORM_CONSTRAINTS = {
 }
 
 
-def _get_client():
-    """Prefer Groq (free tier, OpenAI-compatible API) over OpenAI if both are set."""
-    global _client, _chat_model
-    if _client is not None:
-        return _client
+def _is_configured(key: str | None) -> bool:
+    """Validate whether an API key has been set with a real value."""
+    if not key:
+        return False
+    k = key.strip()
+    return bool(k and not k.startswith("your_") and k != "placeholder")
 
+
+def _get_active_model_and_client():
+    """Return the first configured (client, model_name) tuple for secondary tasks."""
     groq_key = os.getenv("GROQ_API_KEY")
-    if groq_key and groq_key != "your_groq_api_key_here":
+    if _is_configured(groq_key):
         try:
-            _client = OpenAI(api_key=groq_key, base_url="https://api.groq.com/openai/v1")
-            _chat_model = "openai/gpt-oss-20b"
-            return _client
+            model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+            client = OpenAI(
+                api_key=groq_key,
+                base_url="https://api.groq.com/openai/v1",
+                timeout=12.0,
+            )
+            return client, model
+        except Exception:
+            pass
+
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    if _is_configured(openrouter_key):
+        try:
+            model = os.getenv("OPENROUTER_MODEL", "openrouter/auto")
+            return OpenAI(
+                api_key=openrouter_key,
+                base_url="https://openrouter.ai/api/v1",
+                default_headers={"HTTP-Referer": "http://localhost:3000", "X-Title": "SteadyPost"},
+                timeout=12.0,
+            ), model
+        except Exception:
+            pass
+
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if _is_configured(gemini_key):
+        try:
+            model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+            return OpenAI(
+                api_key=gemini_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                timeout=12.0,
+            ), model
         except Exception:
             pass
 
     openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key and openai_key != "your_openai_api_key_here":
+    if _is_configured(openai_key):
         try:
-            _client = OpenAI(api_key=openai_key)
-            _chat_model = "gpt-4o-mini"
-            return _client
+            return OpenAI(api_key=openai_key, timeout=12.0), "gpt-4o-mini"
         except Exception:
             pass
 
-    return None
+    return None, None
 
 
-def generate_caption(topic: str, platform: str = "instagram", tone: str = "casual") -> dict:
-    client = _get_client()
-    constraint = PLATFORM_CONSTRAINTS.get(platform, "general social media best practices")
+def _generate_with_groq(messages: list) -> dict:
+    key = os.getenv("GROQ_API_KEY")
+    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+    if not _is_configured(key):
+        return {
+            "provider": "groq",
+            "label": "Groq",
+            "model": model,
+            "caption": None,
+            "status": "not_configured",
+            "error": "GROQ_API_KEY is not configured in ai-service/.env",
+        }
+    try:
+        client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1", timeout=12.0)
+        res = client.chat.completions.create(model=model, messages=messages, temperature=0.8)
+        caption = res.choices[0].message.content.strip()
+        return {
+            "provider": "groq",
+            "label": "Groq",
+            "model": model,
+            "caption": caption,
+            "status": "success",
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "provider": "groq",
+            "label": "Groq",
+            "model": model,
+            "caption": None,
+            "status": "error",
+            "error": str(e),
+        }
 
-    if client:
-        try:
-            response = client.chat.completions.create(
-                model=_chat_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"You are a social media copywriter. Write for {platform}: "
-                        f"{constraint}. Tone: {tone}.",
-                    },
-                    {"role": "user", "content": f"Write a caption about: {topic}"},
-                ],
-                temperature=0.8,
-            )
-            caption_text = response.choices[0].message.content.strip()
-            return {
-                "platform": platform,
-                "caption": caption_text,
-                "model": _chat_model,
-                "tone": tone,
-            }
-        except Exception:
-            # Fallback to smart template generator
-            pass
 
-    # Built-in generator
+def _generate_with_openrouter(messages: list) -> dict:
+    key = os.getenv("OPENROUTER_API_KEY")
+    model = os.getenv("OPENROUTER_MODEL", "openrouter/auto")
+    if not _is_configured(key):
+        return {
+            "provider": "openrouter",
+            "label": "OpenRouter",
+            "model": model,
+            "caption": None,
+            "status": "not_configured",
+            "error": "OPENROUTER_API_KEY is not configured in ai-service/.env",
+        }
+    try:
+        client = OpenAI(
+            api_key=key,
+            base_url="https://openrouter.ai/api/v1",
+            default_headers={"HTTP-Referer": "http://localhost:3000", "X-Title": "SteadyPost"},
+            timeout=14.0,
+        )
+        res = client.chat.completions.create(model=model, messages=messages, temperature=0.8)
+        caption = res.choices[0].message.content.strip()
+        return {
+            "provider": "openrouter",
+            "label": "OpenRouter",
+            "model": model,
+            "caption": caption,
+            "status": "success",
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "provider": "openrouter",
+            "label": "OpenRouter",
+            "model": model,
+            "caption": None,
+            "status": "error",
+            "error": str(e),
+        }
+
+
+def _generate_with_gemini(messages: list) -> dict:
+    key = os.getenv("GEMINI_API_KEY")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+    if not _is_configured(key):
+        return {
+            "provider": "gemini",
+            "label": "Google Gemini",
+            "model": model,
+            "caption": None,
+            "status": "not_configured",
+            "error": "GEMINI_API_KEY is not configured in ai-service/.env",
+        }
+    try:
+        client = OpenAI(
+            api_key=key,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            timeout=12.0,
+        )
+        res = client.chat.completions.create(model=model, messages=messages, temperature=0.8)
+        caption = res.choices[0].message.content.strip()
+        return {
+            "provider": "gemini",
+            "label": "Google Gemini",
+            "model": model,
+            "caption": caption,
+            "status": "success",
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "provider": "gemini",
+            "label": "Google Gemini",
+            "model": model,
+            "caption": None,
+            "status": "error",
+            "error": str(e),
+        }
+
+
+def _local_template_caption(topic: str, platform: str = "instagram", tone: str = "casual") -> str:
     if platform == "twitter":
-        caption_text = (
+        return (
             f"🚀 {topic}\n\nKey takeaway: Focus on high-leverage outcomes and daily "
             "consistency.\n\n#Growth #Tech"
         )
     elif platform == "linkedin":
-        caption_text = (
+        return (
             f"Perspective on {topic}:\n\n1. Identify bottlenecks early\n"
             "2. Iterate rapidly based on data\n3. Build scalable distribution\n\n"
             "How is your organization approaching this?\n\n#Leadership #B2B #Innovation"
         )
     elif platform == "facebook":
-        caption_text = (
+        return (
             f"We are diving deep into {topic}! 💡 What has been your experience so far? "
             "Drop your insights below!"
         )
     else:  # Instagram
-        caption_text = (
+        return (
             f"✨ Exploring {topic}\n\nTransforming ideas into high-impact results takes the "
             "right strategy and focus. Double tap if you agree! 💫\n\n#GrowthMindset "
             "#CreatorCommunity #Innovation #Strategy"
         )
 
-    return {"platform": platform, "caption": caption_text, "model": "local-ai-engine", "tone": tone}
+
+def generate_caption(topic: str, platform: str = "instagram", tone: str = "casual") -> dict:
+    constraint = PLATFORM_CONSTRAINTS.get(platform, "general social media best practices")
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"You are a social media copywriter. Write for {platform}: "
+                f"{constraint}. Tone: {tone}."
+            ),
+        },
+        {"role": "user", "content": f"Write a caption about: {topic}"},
+    ]
+
+    providers = [
+        ("groq", _generate_with_groq),
+        ("openrouter", _generate_with_openrouter),
+        ("gemini", _generate_with_gemini),
+    ]
+
+    candidates_by_name = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_name = {executor.submit(fn, messages): name for name, fn in providers}
+        for future in as_completed(future_to_name):
+            name = future_to_name[future]
+            try:
+                candidates_by_name[name] = future.result()
+            except Exception as err:
+                candidates_by_name[name] = {
+                    "provider": name,
+                    "label": name.capitalize(),
+                    "model": "unknown",
+                    "caption": None,
+                    "status": "error",
+                    "error": str(err),
+                }
+
+    # Ensure consistent order: Groq, OpenRouter, Gemini
+    candidates = [candidates_by_name[name] for name, _ in providers if name in candidates_by_name]
+
+    # Select the first successfully generated caption for backward compatibility
+    successful_candidate = next(
+        (c for c in candidates if c.get("status") == "success" and c.get("caption")),
+        None,
+    )
+
+    if successful_candidate:
+        primary_caption = successful_candidate["caption"]
+        primary_model = successful_candidate["model"]
+    else:
+        primary_caption = _local_template_caption(topic, platform, tone)
+        primary_model = "local-template-fallback"
+
+    return {
+        "platform": platform,
+        "tone": tone,
+        "caption": primary_caption,
+        "model": primary_model,
+        "candidates": candidates,
+    }
 
 
 def generate_hashtags(content: str, platform: str = "instagram", max_tags: int = 10) -> dict:
-    client = _get_client()
+    client, model_name = _get_active_model_and_client()
 
     if client:
         try:
             response = client.chat.completions.create(
-                model=_chat_model,
+                model=model_name,
                 messages=[
                     {
                         "role": "system",
@@ -117,7 +293,7 @@ def generate_hashtags(content: str, platform: str = "instagram", max_tags: int =
             raw = response.choices[0].message.content.strip()
             hashtags = re.findall(r"#\w+", raw)[:max_tags]
             if hashtags:
-                return {"platform": platform, "hashtags": hashtags, "model": _chat_model}
+                return {"platform": platform, "hashtags": hashtags, "model": model_name}
         except Exception:
             pass
 
@@ -139,7 +315,7 @@ def generate_hashtags(content: str, platform: str = "instagram", max_tags: int =
 
 
 def repurpose_content(content: str, source_platform: str, target_platforms: list) -> dict:
-    client = _get_client()
+    client, model_name = _get_active_model_and_client()
     results = {}
 
     if client:
@@ -147,7 +323,7 @@ def repurpose_content(content: str, source_platform: str, target_platforms: list
             for target in target_platforms:
                 constraint = PLATFORM_CONSTRAINTS.get(target, "general social media best practices")
                 response = client.chat.completions.create(
-                    model=_chat_model,
+                    model=model_name,
                     messages=[
                         {
                             "role": "system",
@@ -160,7 +336,7 @@ def repurpose_content(content: str, source_platform: str, target_platforms: list
                 )
                 results[target] = response.choices[0].message.content.strip()
 
-            return {"sourcePlatform": source_platform, "repurposed": results, "model": _chat_model}
+            return {"sourcePlatform": source_platform, "repurposed": results, "model": model_name}
         except Exception:
             pass
 
