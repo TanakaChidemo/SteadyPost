@@ -10,10 +10,11 @@ seeded once at boot in
 [`backend/src/data/seed.js`](backend/src/data/seed.js) if they do not
 already exist.
 
-See also: [`docs/RUNNING.md`](docs/RUNNING.md) for a step-by-step setup guide
-(including common gotchas), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-for how the pieces fit together, and [`docs/openapi.yaml`](docs/openapi.yaml)
-for the API contract (served at `/api/docs` when the backend is running).
+See also: [`CONTRIBUTING.md`](CONTRIBUTING.md) for the team branch and PR workflow,
+[`docs/RUNNING.md`](docs/RUNNING.md) for a step-by-step setup guide (including
+common gotchas), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how the
+pieces fit together, and [`docs/openapi.yaml`](docs/openapi.yaml) for the API
+contract (served at `/api/docs` when the backend is running).
 
 ## Features
 
