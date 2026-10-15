@@ -12,14 +12,37 @@ import {
   PlusIcon,
   ArrowUpRightIcon,
   SendIcon,
+  UsersIcon,
+  BarChartIcon,
 } from "../../components/Icons";
+import { PageHeader, StatCard, Card, CardHeader, CardBody } from "../../components/ui/Card";
+import { Button, IconButton } from "../../components/ui/Button";
+import { Field, Textarea } from "../../components/ui/Field";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { CardGridSkeleton } from "../../components/ui/Skeleton";
+import { cn } from "../../lib/cn";
+
+const PLATFORM_TOGGLE = [
+  { id: "instagram", Icon: InstagramIcon, label: "Instagram" },
+  { id: "facebook", Icon: FacebookIcon, label: "Facebook" },
+];
 
 export default function DashboardOverviewPage() {
-  const { user, authReady, token, drafts, setDrafts, socialAccounts, addToast, setAiModalOpen } = useAppStore();
+  const {
+    user,
+    authReady,
+    token,
+    drafts,
+    setDrafts,
+    socialAccounts,
+    addToast,
+    setAiModalOpen,
+  } = useAppStore();
 
   const [quickPost, setQuickPost] = useState("");
   const [quickPlatform, setQuickPlatform] = useState("instagram");
   const [isPublishing, setIsPublishing] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(true);
 
   useEffect(() => {
     // Wait for auth to be resolved (token restored from localStorage) so this
@@ -28,11 +51,14 @@ export default function DashboardOverviewPage() {
   }, [authReady, token]);
 
   async function loadData() {
+    setStatsLoading(true);
     try {
       const draftItems = await api.content.list();
       setDrafts(draftItems);
     } catch (err) {
-      // fallback
+      // fallback: keep store values
+    } finally {
+      setStatsLoading(false);
     }
   }
 
@@ -51,7 +77,7 @@ export default function DashboardOverviewPage() {
       });
       const result = await api.publish.waitForResult(postId);
       if (result.status === "published") {
-        addToast("success", `🚀 Published to ${quickPlatform}!`);
+        addToast("success", `Published to ${quickPlatform}!`);
         setQuickPost("");
       } else {
         addToast("error", `Failed to publish to ${quickPlatform}: ${result.errorMessage || "Publishing did not complete"}`);
@@ -64,138 +90,144 @@ export default function DashboardOverviewPage() {
     }
   }
 
+  const firstName = user?.name?.split(" ")[0];
+
   return (
     <div className="space-y-6">
-      {/* Welcome Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">
-            Welcome back, {user?.name || "Tanaka Chidemo"} 👋
-          </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Here is what is happening across your social channels today.
-          </p>
-        </div>
+      <PageHeader
+        eyebrow="Overview"
+        title={firstName ? `Welcome back, ${firstName}` : "Welcome to SteadyPost"}
+        description="Here is what is happening across your social channels today."
+        actions={
+          <>
+            <Button variant="ai" size="sm" onClick={() => setAiModalOpen(true)}>
+              <SparklesIcon className="w-4 h-4" aria-hidden="true" />
+              AI Copywriter
+            </Button>
+            <Link href="/dashboard/content">
+              <Button size="sm">
+                <PlusIcon className="w-4 h-4" aria-hidden="true" />
+                New Campaign
+              </Button>
+            </Link>
+          </>
+        }
+      />
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setAiModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-purple-950/60 border border-purple-500/40 text-purple-300 text-xs font-semibold hover:border-purple-400 transition"
-          >
-            <SparklesIcon className="w-4 h-4 text-purple-400" />
-            <span>AI Copywriter</span>
-          </button>
-          <Link
-            href="/dashboard/content"
-            className="flex items-center gap-1.5 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
-          >
-            <PlusIcon className="w-4 h-4" />
-            <span>New Campaign</span>
-          </Link>
+      {statsLoading ? (
+        <CardGridSkeleton count={3} />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger">
+          <StatCard
+            label="Drafts in studio"
+            value={drafts.length}
+            hint="Ready for editing and review"
+            icon={<LayersIcon className="w-5 h-5" aria-hidden="true" />}
+          />
+          <StatCard
+            label="Channels connected"
+            value={`${socialAccounts.length} / 2`}
+            hint="Instagram · Facebook"
+            icon={<UsersIcon className="w-5 h-5" aria-hidden="true" />}
+            iconTone="bg-info-bg text-info"
+            trend={
+              socialAccounts.length > 0 ? (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-success-bg border border-success/25 font-mono text-micro uppercase tracking-[0.04em] text-success">
+                  <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" aria-hidden="true" />
+                  Synced
+                </span>
+              ) : (
+                <Link href="/dashboard/accounts" className="text-caption font-semibold text-brand-600 hover:text-brand-700 hover:underline">
+                  Connect
+                </Link>
+              )
+            }
+          />
+          <StatCard
+            label="Total audience reach"
+            value="24,850"
+            hint="Across connected networks"
+            icon={<BarChartIcon className="w-5 h-5" aria-hidden="true" />}
+            iconTone="bg-accent-bg text-accent"
+            trend={
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-success-bg border border-success/25 font-mono text-micro uppercase tracking-[0.04em] text-success">
+                +18.4% <ArrowUpRightIcon className="w-3 h-3" aria-hidden="true" />
+              </span>
+            }
+          />
         </div>
-      </div>
-
-      {/* KPI Stats Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Total Audience Reach</span>
-            <span className="text-emerald-400 font-semibold flex items-center gap-0.5">
-              +18.4% <ArrowUpRightIcon className="w-3 h-3" />
-            </span>
-          </div>
-          <div className="text-2xl font-bold text-white">24,850</div>
-          <p className="text-[11px] text-slate-500">Across connected networks</p>
-        </div>
-
-        <div className="p-5 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Drafts in Studio</span>
-            <span className="text-slate-400 font-semibold">{drafts.length} total</span>
-          </div>
-          <div className="text-2xl font-bold text-white">{drafts.length}</div>
-          <p className="text-[11px] text-slate-500">Ready for editing and review</p>
-        </div>
-
-        <div className="p-5 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Channels Connected</span>
-            <span className="text-emerald-400 font-semibold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> 100% Synced
-            </span>
-          </div>
-          <div className="text-2xl font-bold text-white">{socialAccounts.length} / 2</div>
-          <p className="text-[11px] text-slate-500">Instagram, Facebook</p>
-        </div>
-      </div>
+      )}
 
       {/* Quick Composer */}
-      <div className="grid grid-cols-1 gap-6">
-        <div className="p-5 rounded-lg bg-slate-900/80 border border-slate-800 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <LayersIcon className="w-4 h-4 text-indigo-400" />
-              <span>Quick Composer</span>
-            </h3>
-            <div className="flex items-center gap-1.5">
-              {[
-                { id: "instagram", icon: InstagramIcon, color: "text-pink-400" },
-                { id: "facebook", icon: FacebookIcon, color: "text-blue-500" },
-              ].map((p) => {
-                const Icon = p.icon;
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => setQuickPlatform(p.id)}
-                    className={`p-1.5 rounded border transition ${
-                      quickPlatform === p.id
-                        ? "bg-slate-800 border-indigo-500/50" + p.color
-                        : "bg-slate-950 border-slate-800 text-slate-600 hover:text-slate-400"
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                  </button>
-                );
-              })}
+      <Card>
+        <CardHeader
+          eyebrow="Compose"
+          title="Quick Composer"
+          subtitle="Draft and publish a short update without opening the full studio."
+          action={
+            <div className="flex items-center gap-1.5" role="group" aria-label="Publish platform">
+              {PLATFORM_TOGGLE.map(({ id, Icon, label }) => (
+                <IconButton
+                  key={id}
+                  label={label}
+                  aria-pressed={quickPlatform === id}
+                  onClick={() => setQuickPlatform(id)}
+                  className={cn(
+                    quickPlatform === id && "border-brand-500/50 bg-brand-50 text-brand-700"
+                  )}
+                >
+                  <Icon className="w-4 h-4" />
+                </IconButton>
+              ))}
             </div>
-          </div>
+          }
+        />
+        <CardBody className="space-y-4">
+          <Field hint={`${quickPost.length} characters`}>
+            <Textarea
+              rows={4}
+              value={quickPost}
+              onChange={(e) => setQuickPost(e.target.value)}
+              placeholder={`Draft a quick update for ${quickPlatform}… (or open the AI Copywriter for assistance)`}
+              aria-label="Quick post text"
+            />
+          </Field>
 
-          <textarea
-            rows={4}
-            value={quickPost}
-            onChange={(e) => setQuickPost(e.target.value)}
-            placeholder={`Draft a quick update for ${quickPlatform}... (or click"AI Copywriter" for assistance)`}
-            className="w-full px-4 py-3 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-sans"
-          />
-
-          <div className="flex items-center justify-between pt-1">
+          <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
             <Link
               href="/dashboard/content"
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
+              className="text-body-sm text-brand-600 hover:text-brand-700 hover:underline font-semibold"
             >
               Open Full Studio with Live Preview →
             </Link>
-
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setAiModalOpen(true)}
-                className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition flex items-center gap-1"
-              >
-                <SparklesIcon className="w-3.5 h-3.5 text-purple-400" />
-                <span>AI</span>
-              </button>
-              <button
-                onClick={handleQuickPublish}
-                disabled={isPublishing}
-                className="px-4 py-1.5 rounded gradient-brand text-white text-xs font-semibold hover:opacity-95 transition flex items-center gap-1.5"
-              >
-                <SendIcon className="w-3.5 h-3.5" />
-                <span>{isPublishing ? "Publishing..." : "Publish Now"}</span>
-              </button>
+              <Button variant="secondary" size="sm" onClick={() => setAiModalOpen(true)}>
+                <SparklesIcon className="w-3.5 h-3.5" aria-hidden="true" />
+                AI
+              </Button>
+              <Button size="sm" onClick={handleQuickPublish} disabled={isPublishing} loading={isPublishing}>
+                {!isPublishing && <SendIcon className="w-3.5 h-3.5" aria-hidden="true" />}
+                {isPublishing ? "Publishing…" : "Publish Now"}
+              </Button>
             </div>
           </div>
-        </div>
-      </div>
+        </CardBody>
+      </Card>
+
+      {/* First-run nudge */}
+      {!statsLoading && socialAccounts.length === 0 && (
+        <EmptyState
+          icon={UsersIcon}
+          eyebrow="Get started"
+          title="Connect your first channel"
+          description="Link Instagram or Facebook to publish from SteadyPost. It takes about a minute."
+          action={
+            <Link href="/dashboard/accounts">
+              <Button size="sm">Connect a channel</Button>
+            </Link>
+          }
+        />
+      )}
     </div>
   );
 }

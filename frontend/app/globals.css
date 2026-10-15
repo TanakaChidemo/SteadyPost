@@ -2,76 +2,154 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * SteadyPost design tokens — single source of truth for colour.
+ * Warm-paper editorial enterprise theme (light only), modelled on the
+ * Practical Roof EMS template. Values are space-separated RGB triplets
+ * consumed via rgb(var(--c-*) / <alpha>).
+ *
+ * Contrast targets (WCAG 2.1 AA, verified):
+ *   ink      #1a1816  16.4:1 on canvas
+ *   ink-2    #6b6560   5.9:1 on canvas
+ *   ink-3    #766f69   4.9:1 on white cards (darkened from template's #9b9590)
+ *   brand-700 #234d3b  7.4:1 on white — safe for small text & buttons
+ */
 @layer base {
   :root {
-    --bg-primary: #0b0f19;
-    --bg-surface: #111827;
-    --bg-card: #1f2937;
-    --border-subtle: #374151;
+    --c-canvas: 247 246 243;      /* #f7f6f3 warm paper */
+    --c-canvas-warm: 240 238 234; /* #f0eeea warm variant */
+    --c-surface: 255 255 255;     /* sidebar / nav */
+    --c-card: 255 255 255;        /* cards, panels */
+    --c-card-muted: 250 249 247;  /* #faf9f7 muted surface */
+    --c-overlay: 26 24 22;        /* modal scrim base */
+    --c-line: 226 223 218;        /* #e2dfda borders */
+    --c-line-subtle: 236 233 228; /* #ece9e4 hairlines */
+    --c-line-strong: 208 203 194;
+    --c-ink: 26 24 22;            /* #1a1816 headings, body */
+    --c-ink-2: 107 101 96;        /* #6b6560 secondary */
+    --c-ink-3: 118 111 105;       /* #766f69 tertiary — 4.9:1 on white cards */
+    --c-brand: 44 95 74;          /* #2c5f4a */
+    --c-brand-strong: 35 77 59;   /* #234d3b */
+    --c-brand-tint: 232 240 236;  /* #e8f0ec */
+    /* Status tokens — template role palette, tinted bg + saturated text */
+    --c-success: 44 122 78;       /* #2c7a4e */
+    --c-success-bg: 232 245 236;  /* #e8f5ec */
+    --c-warning: 138 97 6;        /* #8a6106 — 5.1:1 on tint */
+    --c-warning-bg: 253 246 227;  /* #fdf6e3 */
+    --c-danger: 153 27 27;        /* #991b1b */
+    --c-danger-bg: 252 232 236;   /* #fce8ec */
+    --c-info: 74 111 165;         /* #4a6fa5 */
+    --c-info-bg: 238 242 248;     /* #eef2f8 */
+    --c-accent: 107 76 138;       /* #6b4c8a */
+    --c-accent-bg: 243 238 248;   /* #f3eef8 */
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    overflow-x: hidden;
+  }
+
+  /* Serif display headings get their letter-spacing from the type scale. */
+  h1, h2, .font-display {
+    text-wrap: balance;
+  }
+
+  /* Visible keyboard focus everywhere — 2px forest ring with offset. */
+  :focus-visible {
+    outline: 2px solid #2c5f4a;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: rgb(44 95 74 / 0.22);
   }
 }
 
-body {
-  background-color: #0b0f19;
-  color: #f3f4f6;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  overflow-x: hidden;
+/* Slim warm scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-line-strong)) transparent;
 }
-
-/* Custom modern scrollbar */
-::-webkit-scrollbar {
+*::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-
-::-webkit-scrollbar-track {
-  background: #111827;
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
-
-::-webkit-scrollbar-thumb {
-  background: #374151;
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--c-line-strong));
   border-radius: 4px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
-}
+@layer utilities {
+  /* Primary CTA: solid forest green (template style — no gradients). */
+  .btn-brand {
+    background-color: #2c5f4a;
+    color: #faf9f7;
+    border: 1px solid #2c5f4a;
+    box-shadow: 0 1px 2px rgb(26 24 22 / 0.08);
+  }
+  .btn-brand:hover {
+    background-color: #234d3b;
+    border-color: #234d3b;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px -8px rgb(26 24 22 / 0.22);
+  }
 
-/* Glassmorphic utilities */
-.glass-panel {
-  background: rgba(17, 24, 39, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.glass-card {
-  background: rgba(31, 41, 55, 0.6);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.gradient-brand {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
-}
-
-.gradient-glow {
-  box-shadow: 0 0 35px -5px rgba(99, 102, 241, 0.35);
-}
-
-/* Animation utilities */
-@keyframes fadeIn {
-  from {
+  /* Staggered fade-up entrances for dashboard grids */
+  .stagger > * {
     opacity: 0;
-    transform: translateY(6px);
+    animation: fade-up 0.22s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  .stagger > *:nth-child(1) { animation-delay: 0.02s; }
+  .stagger > *:nth-child(2) { animation-delay: 0.06s; }
+  .stagger > *:nth-child(3) { animation-delay: 0.10s; }
+  .stagger > *:nth-child(4) { animation-delay: 0.14s; }
+  .stagger > *:nth-child(5) { animation-delay: 0.18s; }
+  .stagger > *:nth-child(6) { animation-delay: 0.22s; }
+  .stagger > *:nth-child(7) { animation-delay: 0.26s; }
+  .stagger > *:nth-child(8) { animation-delay: 0.30s; }
+
+  /* Skeleton shimmer */
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--c-ink) / 0.06),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
+  }
+
+  /* Hide scrollbars for horizontal chip rows while keeping scroll */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
