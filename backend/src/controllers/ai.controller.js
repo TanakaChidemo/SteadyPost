@@ -1,5 +1,6 @@
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:5001";
 const logger = require("../config/logger");
+const businessProfileModel = require("../models/businessProfile.model");
 
 const PLATFORM_STYLES = {
   twitter: {
@@ -48,18 +49,41 @@ async function forwardToAiService(path, body) {
 }
 
 async function generateCaption(req, res) {
-  const { topic, platform = "instagram", tone = "casual" } = req.body;
+  const { topic, platform = "instagram", tone } = req.body;
   if (!topic) return res.status(400).json({ error: "topic is required" });
+
+  let effectiveTone = tone;
+  let profileContext = null;
+
+  if (req.workspaceId) {
+    const profile = await businessProfileModel.findByWorkspaceId(req.workspaceId);
+    if (profile) {
+      if (!effectiveTone && profile.tone?.length) {
+        effectiveTone = profile.tone[0];
+      }
+      profileContext = {
+        businessType: profile.businessType,
+        offer: profile.offer,
+        audience: profile.audience,
+        tone: profile.tone,
+      };
+    }
+  }
+
+  if (!effectiveTone) effectiveTone = "casual";
 
   const aiResult = await forwardToAiService("/generate/caption", {
     ...req.body,
+    tone: effectiveTone,
+    businessProfile: profileContext,
+    workspaceId: req.workspaceId,
     userId: req.user.id,
   });
 
   if (aiResult) return res.json(aiResult);
 
   const style = PLATFORM_STYLES[platform] || PLATFORM_STYLES.instagram;
-  const caption = style.format(topic, tone);
+  const caption = style.format(topic, effectiveTone);
 
   return res.json({
     platform,

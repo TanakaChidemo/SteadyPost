@@ -1,15 +1,23 @@
 import { create } from "zustand";
-import { api, getAccessToken, getRefreshToken, setTokens, clearTokens } from "./apiClient";
+import {
+  api,
+  getAccessToken,
+  getRefreshToken,
+  setTokens,
+  clearTokens,
+  setActiveWorkspaceId,
+  getActiveWorkspaceId,
+} from "./apiClient";
 
 export const useAppStore = create((set, get) => ({
   user: null,
   token: null,
-  // True once we've checked localStorage for a token and (if present)
-  // confirmed it against GET /auth/me. Components that fetch user-scoped
-  // data on mount should wait for this instead of firing immediately —
-  // otherwise the very first request races the token being loaded and
-  // just 401s silently.
   authReady: false,
+  workspaces: [],
+  currentWorkspace: null,
+  businessProfile: null,
+  isBusinessProfileOpen: false,
+  isCreateWorkspaceOpen: false,
   drafts: [],
   activeDraft: null,
   socialAccounts: [],
@@ -26,14 +34,28 @@ export const useAppStore = create((set, get) => ({
       return;
     }
     try {
-      // If the access token has expired, apiClient's response interceptor
-      // transparently refreshes it (via the stored refresh token) and
-      // retries this call, so this only throws once both are invalid.
       const { user } = await api.auth.me();
-      set({ user, token: getAccessToken(), authReady: true });
+      
+      const wsList = await api.workspaces.list().catch(() => []);
+
+      const activeWsId = getActiveWorkspaceId() || user?.activeWorkspaceId;
+      const currentWorkspace =
+        wsList.find((w) => (w.id || w._id) === activeWsId) || wsList[0] || null;
+
+      if (currentWorkspace) {
+        setActiveWorkspaceId(currentWorkspace.id || currentWorkspace._id);
+      }
+
+      set({
+        user,
+        token: getAccessToken(),
+        workspaces: wsList,
+        currentWorkspace,
+        authReady: true,
+      });
     } catch (err) {
       clearTokens();
-      set({ user: null, token: null, authReady: true });
+      set({ user: null, token: null, workspaces: [], currentWorkspace: null, authReady: true });
     }
   },
 
@@ -46,27 +68,72 @@ export const useAppStore = create((set, get) => ({
       }
     }
     set({ user, token: accessToken !== undefined ? accessToken : get().token, authReady: true });
+    if (user) {
+      get().fetchWorkspaces();
+    }
   },
 
-  // Resets auth state after the refresh token itself has expired or been
-  // rejected (see apiClient's "steadypost:session-expired" event) — as
-  // opposed to logout(), this doesn't imply the user asked to sign out.
+  fetchWorkspaces: async () => {
+    try {
+      const items = await api.workspaces.list();
+      const activeWsId = getActiveWorkspaceId() || get().user?.activeWorkspaceId;
+      const currentWorkspace =
+        items.find((w) => (w.id || w._id) === activeWsId) || items[0] || null;
+
+      if (currentWorkspace) {
+        setActiveWorkspaceId(currentWorkspace.id || currentWorkspace._id);
+      }
+      set({ workspaces: items, currentWorkspace });
+      return items;
+    } catch (err) {
+      return [];
+    }
+  },
+
+  switchWorkspace: async (workspaceId) => {
+    try {
+      set({ isLoading: true });
+      await api.workspaces.switch(workspaceId);
+      setActiveWorkspaceId(workspaceId);
+
+      const items = await api.workspaces.list();
+      const currentWorkspace = items.find((w) => (w.id || w._id) === workspaceId) || null;
+
+      set({
+        workspaces: items,
+        currentWorkspace,
+        isLoading: false,
+      });
+
+      // Refresh channels and drafts for the selected workspace
+      api.socialAccounts.list().then((accounts) => set({ socialAccounts: accounts })).catch(() => {});
+      api.content.list().then((drafts) => set({ drafts })).catch(() => {});
+
+      get().addToast("success", `Switched to ${currentWorkspace?.name || "workspace"}`);
+    } catch (err) {
+      set({ isLoading: false });
+      get().addToast("error", err.response?.data?.error || "Failed to switch workspace");
+    }
+  },
+
   expireSession: () => {
     clearTokens();
-    set({ user: null, token: null });
+    set({ user: null, token: null, workspaces: [], currentWorkspace: null });
     get().addToast("error", "Your session expired — please sign in again");
     get().setAuthModalOpen(true);
   },
 
   logout: () => {
     clearTokens();
-    set({ user: null, token: null });
+    set({ user: null, token: null, workspaces: [], currentWorkspace: null });
     get().addToast("info", "Signed out successfully");
   },
 
   setDrafts: (drafts) => set({ drafts }),
   setActiveDraft: (draft) => set({ activeDraft: draft }),
   setSocialAccounts: (accounts) => set({ socialAccounts: accounts }),
+  setBusinessProfileOpen: (open) => set({ isBusinessProfileOpen: open }),
+  setCreateWorkspaceOpen: (open) => set({ isCreateWorkspaceOpen: open }),
 
   addToast: (type, text) => {
     const id = `toast_${Date.now()}_${Math.random()}`;

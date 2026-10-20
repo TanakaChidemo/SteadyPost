@@ -11,7 +11,12 @@ function requireAuth(req, res, next) {
   const token = header.split(" ")[1];
   try {
     const payload = jwt.verify(token, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
-    req.user = { id: payload.sub, email: payload.email, role: payload.role || "member" };
+    req.user = {
+      id: payload.sub,
+      email: payload.email,
+      role: payload.role || "member",
+      activeWorkspaceId: payload.activeWorkspaceId || null,
+    };
     return next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired token" });

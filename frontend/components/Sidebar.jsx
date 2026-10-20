@@ -21,18 +21,24 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { authReady, token, socialAccounts, setSocialAccounts } = useAppStore();
+  const {
+    authReady,
+    token,
+    socialAccounts,
+    setSocialAccounts,
+    currentWorkspace,
+    setBusinessProfileOpen,
+  } = useAppStore();
 
-  // The sidebar is mounted on every dashboard page, so this is also what
-  // populates socialAccounts for pages (like Overview) that display connection
-  // state but don't fetch it themselves.
+  // The sidebar is mounted on every dashboard page. Re-fetches social accounts
+  // when auth is ready or when the user switches to a different business venture.
   useEffect(() => {
     if (!authReady) return;
     api.socialAccounts
       .list()
       .then(setSocialAccounts)
       .catch(() => {});
-  }, [authReady, token, setSocialAccounts]);
+  }, [authReady, token, currentWorkspace, setSocialAccounts]);
 
   const isConnected = (platform) => socialAccounts.some((a) => a.platform === platform);
 
@@ -73,6 +79,20 @@ export function Sidebar() {
                 </Link>
               );
             })}
+
+            {/* Business Profile Trigger */}
+            <button
+              onClick={() => setBusinessProfileOpen(true)}
+              className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-900/80 hover:text-slate-200 transition-all text-left group"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-sm">🏢</span>
+                <span className="group-hover:text-indigo-300 transition">Business Profile</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-semibold text-slate-400 group-hover:text-slate-300">
+                Setup
+              </span>
+            </button>
           </nav>
         </div>
 
