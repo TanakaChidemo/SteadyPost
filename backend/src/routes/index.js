@@ -9,6 +9,7 @@ const workspaceRoutes = require("./workspace.routes");
 const businessProfileRoutes = require("./businessProfile.routes");
 const postRoutes = require("./post.routes");
 const opportunityRoutes = require("./opportunity.routes");
+const websiteRoutes = require("./website.routes");
 
 const router = express.Router();
 
@@ -21,5 +22,6 @@ router.use("/content", contentRoutes);
 router.use("/ai", aiRoutes);
 router.use("/publish", publishRoutes);
 router.use("/social-accounts", socialAccountRoutes);
+router.use("/website", websiteRoutes);
 
 module.exports = router;
