@@ -8,7 +8,8 @@ function toClientAccount({ accessToken, ...rest }) {
 }
 
 async function list(req, res) {
-  const items = await socialAccountModel.list(req.user.id);
+  const scopeId = req.workspaceId || req.user.id;
+  const items = await socialAccountModel.list(scopeId);
   return res.json({ items: items.map(toClientAccount) });
 }
 
@@ -20,17 +21,23 @@ async function link(req, res) {
   const name = displayName || `${platform.toUpperCase()} Account (@${extId})`;
 
   const account = await socialAccountModel.create({
+    workspaceId: req.workspaceId || null,
     ownerId: req.user.id,
     platform,
     externalAccountId: extId,
     displayName: name,
+    linkedBy: req.user.id,
   });
 
   return res.status(201).json(toClientAccount(account));
 }
 
 async function unlink(req, res) {
-  const result = await socialAccountModel.deleteOne({ _id: req.params.id, ownerId: req.user.id });
+  const filter = req.workspaceId
+    ? { _id: req.params.id, $or: [{ workspaceId: req.workspaceId }, { ownerId: req.user.id }] }
+    : { _id: req.params.id, ownerId: req.user.id };
+
+  const result = await socialAccountModel.deleteOne(filter);
   if (result.deletedCount === 0) return res.status(404).json({ error: "Social account not found" });
 
   return res.status(204).send();

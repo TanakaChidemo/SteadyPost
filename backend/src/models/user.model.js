@@ -12,6 +12,13 @@ const userSchema = new mongoose.Schema(
     // excludes documents where the field is absent, not ones set to null,
     // so every password-only user would collide on a null googleId.
     googleId: { type: String, unique: true, sparse: true },
+    telegramIdentity: {
+      id: { type: String, sparse: true },
+      username: { type: String, default: null },
+      chatId: { type: String, default: null },
+      linkedAt: { type: Date, default: null },
+    },
+    activeWorkspaceId: { type: String, default: null },
   },
   { timestamps: true }
 );
@@ -30,10 +37,11 @@ async function findByGoogleId(googleId) {
   return withId(await User.findOne({ googleId }).lean());
 }
 
-async function create({ email, passwordHash, name, role = "member", googleId }) {
+async function create({ email, passwordHash, name, role = "member", googleId, activeWorkspaceId }) {
   const doc = { email, name, role };
   if (passwordHash) doc.passwordHash = passwordHash;
   if (googleId) doc.googleId = googleId;
+  if (activeWorkspaceId) doc.activeWorkspaceId = activeWorkspaceId;
   const user = await User.create(doc);
   return withId(user.toObject());
 }
@@ -42,4 +50,12 @@ async function linkGoogleId(userId, googleId) {
   return withId(await User.findByIdAndUpdate(userId, { googleId }, { new: true }).lean());
 }
 
-module.exports = { findByEmail, findById, findByGoogleId, create, linkGoogleId };
+async function setActiveWorkspace(userId, workspaceId) {
+  return withId(await User.findByIdAndUpdate(userId, { activeWorkspaceId: workspaceId }, { new: true }).lean());
+}
+
+async function updateById(userId, updates) {
+  return withId(await User.findByIdAndUpdate(userId, updates, { new: true }).lean());
+}
+
+module.exports = { findByEmail, findById, findByGoogleId, create, linkGoogleId, setActiveWorkspace, updateById };

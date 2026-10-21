@@ -27,16 +27,35 @@ export function setTokens({ accessToken, refreshToken } = {}) {
   if (refreshToken) window.localStorage.setItem("refreshToken", refreshToken);
 }
 
+export function getActiveWorkspaceId() {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem("activeWorkspaceId");
+}
+
+export function setActiveWorkspaceId(workspaceId) {
+  if (typeof window === "undefined") return;
+  if (workspaceId) {
+    window.localStorage.setItem("activeWorkspaceId", workspaceId);
+  } else {
+    window.localStorage.removeItem("activeWorkspaceId");
+  }
+}
+
 export function clearTokens() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem("accessToken");
   window.localStorage.removeItem("refreshToken");
+  window.localStorage.removeItem("activeWorkspaceId");
 }
 
 apiClient.interceptors.request.use((config) => {
   const token = getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  const workspaceId = getActiveWorkspaceId();
+  if (workspaceId) {
+    config.headers["X-Workspace-Id"] = workspaceId;
   }
   return config;
 });
@@ -149,6 +168,20 @@ export const api = {
     list: () => apiClient.get("/social-accounts").then((r) => r.data.items || []),
     link: (data) => apiClient.post("/social-accounts", data).then((r) => r.data),
     unlink: (id) => apiClient.delete(`/social-accounts/${id}`),
+  },
+  workspaces: {
+    list: () => apiClient.get("/workspaces").then((r) => r.data.items || []),
+    current: () => apiClient.get("/workspaces/current").then((r) => r.data),
+    create: (data) => apiClient.post("/workspaces", data).then((r) => r.data),
+    switch: (id) => apiClient.post(`/workspaces/switch/${id}`).then((r) => r.data),
+    listMembers: () => apiClient.get("/workspaces/current/members").then((r) => r.data.items || []),
+    inviteMember: (data) => apiClient.post("/workspaces/current/invitations", data).then((r) => r.data),
+  },
+  businessProfile: {
+    get: () => apiClient.get("/business-profile/profile").then((r) => r.data),
+    update: (data) => apiClient.put("/business-profile/profile", data).then((r) => r.data),
+    getNotifications: () => apiClient.get("/business-profile/notifications").then((r) => r.data),
+    updateNotifications: (data) => apiClient.put("/business-profile/notifications", data).then((r) => r.data),
   },
   ai: {
     generateCaption: (data) => apiClient.post("/ai/generate-caption", data).then((r) => r.data),

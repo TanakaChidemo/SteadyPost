@@ -1,5 +1,6 @@
 const logger = require("../config/logger");
 const scheduledPostModel = require("../models/scheduledPost.model");
+const postModel = require("../models/post.model");
 const metaPublisher = require("../services/publishers/metaPublisher");
 
 /**
@@ -25,16 +26,36 @@ async function processPublishJob(job) {
 
     const externalPostId = result.externalId || `ext_${platform}_${Date.now()}`;
 
-    await scheduledPostModel.updateById(postId, {
-      status: "published",
-      externalPostId,
-      errorMessage: null,
-    });
+    // Update unified Post model
+    await postModel
+      .updateById(postId, {
+        status: "published",
+        publishedAt: new Date(),
+        externalPostId,
+        errorMessage: null,
+      })
+      .catch(() => {});
+
+    // Update legacy ScheduledPost model if exists
+    await scheduledPostModel
+      .updateById(postId, {
+        status: "published",
+        externalPostId,
+        errorMessage: null,
+      })
+      .catch(() => {});
 
     logger.info({ postId, platform, externalPostId }, "Publish job completed successfully");
     return result;
   } catch (err) {
     logger.error({ postId, platform, err: err.message }, "Publish job failed");
+
+    await postModel
+      .updateById(postId, {
+        status: "failed",
+        errorMessage: err.message || "Publishing failed",
+      })
+      .catch(() => {});
 
     await scheduledPostModel
       .updateById(postId, { status: "failed", errorMessage: err.message || "Publishing failed" })

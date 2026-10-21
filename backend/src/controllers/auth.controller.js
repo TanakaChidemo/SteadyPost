@@ -3,6 +3,10 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { z } = require("zod");
 const userModel = require("../models/user.model");
+const workspaceModel = require("../models/workspace.model");
+const membershipModel = require("../models/membership.model");
+const businessProfileModel = require("../models/businessProfile.model");
+const notificationSettingsModel = require("../models/notificationSettings.model");
 const socialAccountModel = require("../models/socialAccount.model");
 const logger = require("../config/logger");
 
@@ -20,9 +24,58 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+async function ensureUserWorkspace(user) {
+  if (user.activeWorkspaceId) {
+    const ws = await workspaceModel.findById(user.activeWorkspaceId);
+    if (ws) return user.activeWorkspaceId;
+  }
+
+  const owned = await workspaceModel.findOne({ ownerId: user.id });
+  let workspaceId = owned?._id || owned?.id;
+
+  if (!workspaceId) {
+    const newWs = await workspaceModel.create({
+      name: `${user.name || "Default"}'s Workspace`,
+      ownerId: user.id,
+      status: "active",
+    });
+    workspaceId = newWs._id || newWs.id;
+
+    await membershipModel.create({
+      workspaceId,
+      userId: user.id,
+      role: "owner",
+      status: "active",
+      joinedAt: new Date(),
+    });
+
+    await businessProfileModel.create({
+      workspaceId,
+      businessType: "General Venture",
+      tone: ["professional"],
+      goals: ["brand_awareness"],
+    });
+
+    await notificationSettingsModel.create({
+      workspaceId,
+      dailyCap: 5,
+      channels: { telegram: false, email: true, inApp: true },
+    });
+  }
+
+  await userModel.setActiveWorkspace(user.id, workspaceId);
+  user.activeWorkspaceId = workspaceId;
+  return workspaceId;
+}
+
 function signAccessToken(user) {
   return jwt.sign(
-    { sub: user.id, email: user.email, role: user.role || "member" },
+    {
+      sub: user.id,
+      email: user.email,
+      role: user.role || "member",
+      activeWorkspaceId: user.activeWorkspaceId || null,
+    },
     JWT_ACCESS_SECRET,
     { expiresIn: process.env.JWT_ACCESS_EXPIRY || "15m", algorithm: "HS256" }
   );
@@ -54,8 +107,10 @@ async function register(req, res) {
     role: "member",
   });
 
+  await ensureUserWorkspace(user);
+
   return res.status(201).json({
-    user: { id: user.id, email: user.email, name: user.name, role: user.role },
+    user: { id: user.id, email: user.email, name: user.name, role: user.role, activeWorkspaceId: user.activeWorkspaceId },
     accessToken: signAccessToken(user),
     refreshToken: signRefreshToken(user),
   });
@@ -84,8 +139,10 @@ async function login(req, res) {
     return res.status(401).json({ error: "Invalid email or password" });
   }
 
+  await ensureUserWorkspace(user);
+
   return res.json({
-    user: { id: user.id, email: user.email, name: user.name, role: user.role },
+    user: { id: user.id, email: user.email, name: user.name, role: user.role, activeWorkspaceId: user.activeWorkspaceId },
     accessToken: signAccessToken(user),
     refreshToken: signRefreshToken(user),
   });
@@ -94,9 +151,40 @@ async function login(req, res) {
 async function me(req, res) {
   const user = await userModel.findById(req.user.id);
   if (!user) {
-    return res.json({ user: { id: req.user.id, email: req.user.email, name: "User", role: req.user.role } });
+    return res.json({ user: { id: req.user.id, email: req.user.email, name: "User", role: req.user.role, activeWorkspaceId: null } });
   }
-  return res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+  await ensureUserWorkspace(user);
+  const memberships = await membershipModel.listUserWorkspaces(user.id);
+  const workspaceIds = memberships.map((m) => m.workspaceId);
+  const workspaces = await workspaceModel.find({ _id: { $in: workspaceIds } });
+  const profiles = await businessProfileModel.find({ workspaceId: { $in: workspaceIds } });
+
+  const enriched = workspaces.map((ws) => {
+    const wsId = ws.id || ws._id;
+    const mem = memberships.find((m) => m.workspaceId === wsId);
+    const prof = profiles.find((p) => p.workspaceId === wsId);
+    return {
+      ...ws,
+      id: wsId,
+      role: mem?.role || "viewer",
+      membershipId: mem?.id || mem?._id,
+      isCurrent: (user.activeWorkspaceId || req.workspaceId) === wsId,
+      businessType: prof?.businessType || "",
+      websiteUrl: prof?.websiteUrl || "",
+      tone: prof?.tone || [],
+    };
+  });
+
+  return res.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      activeWorkspaceId: user.activeWorkspaceId,
+    },
+    workspaces: enriched,
+  });
 }
 
 async function refresh(req, res) {
@@ -214,6 +302,8 @@ async function handleGoogleOAuthCallback(req, res) {
         });
       }
     }
+
+    await ensureUserWorkspace(user);
 
     const params = new URLSearchParams({
       accessToken: signAccessToken(user),

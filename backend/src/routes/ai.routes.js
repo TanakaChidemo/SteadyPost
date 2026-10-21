@@ -1,9 +1,10 @@
 const express = require("express");
 const aiController = require("../controllers/ai.controller");
 const { requireAuth } = require("../middleware/auth");
+const { resolveWorkspace } = require("../middleware/workspaceContext");
 
 const router = express.Router();
-router.use(requireAuth);
+router.use(requireAuth, resolveWorkspace);
 
 router.post("/generate-caption", aiController.generateCaption);
 router.post("/suggest-hashtags", aiController.suggestHashtags);
