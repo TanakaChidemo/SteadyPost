@@ -82,4 +82,22 @@ export const useAppStore = create((set, get) => ({
 
   setAuthModalOpen: (open) => set({ isAuthModalOpen: open }),
   setAiModalOpen: (open) => set({ isAiModalOpen: open }),
+
+  // Theme: 'dark' | 'light'. Resolved from localStorage on boot
+  // (see components/ThemeProvider) so the first paint is correct.
+  theme: "dark",
+  setTheme: (theme) => {
+    set({ theme });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("steadypost:theme", theme);
+      document.documentElement.classList.toggle("dark", theme === "dark");
+    }
+  },
+
+  // Workspaces — card #02 (multi-venture) builds on this. Today there is
+  // exactly one workspace per user; the switcher UI already exists so the
+  // upgrade is data-only.
+  workspaces: [{ id: "default", name: "My Workspace" }],
+  activeWorkspaceId: "default",
+  setActiveWorkspaceId: (id) => set({ activeWorkspaceId: id }),
 }));

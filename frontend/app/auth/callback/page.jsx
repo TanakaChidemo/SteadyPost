@@ -8,12 +8,12 @@ import { SparklesIcon } from "../../../components/Icons";
 
 function CallbackFallback() {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+    <div className="min-h-screen bg-canvas text-ink flex items-center justify-center">
       <div className="text-center space-y-3">
-        <div className="w-12 h-12 mx-auto rounded-lg gradient-brand flex items-center justify-center animate-pulse">
+        <div className="w-12 h-12 mx-auto rounded-[14px] bg-brand-500 border border-brand-600 flex items-center justify-center animate-pulse">
           <SparklesIcon className="w-6 h-6 text-white" />
         </div>
-        <p className="text-sm text-slate-400">Finishing sign-in…</p>
+        <p className="font-mono text-label uppercase text-ink-3">Finishing sign-in…</p>
       </div>
     </div>
   );
