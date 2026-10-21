@@ -24,8 +24,7 @@ function createToken(payload) {
 
 async function setupTestDB() {
   if (mongoose.connection.readyState === 0) {
-    const uri = process.env.MONGODB_URI;
-    if (!uri) throw new Error("MONGODB_URI is required for tests");
+    const uri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/steadypost_test";
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 });
   }
 }
