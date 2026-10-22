@@ -89,6 +89,44 @@ describe("extractProfile", () => {
     expect(result.sources).toEqual({});
   });
 
+  it("falls back to the title and icon for a single-page-app shell", () => {
+    const html = `<!DOCTYPE html><html><head>
+      <link rel="icon" type="image/svg+xml" href="/assets/pastreet-P.svg" />
+      <title>pastreet</title>
+      <script type="module" src="/assets/index.js"></script>
+    </head><body><div id="root"></div></body></html>`;
+    const result = extractProfile(html, "https://pastreet.shop/");
+
+    expect(result.found).toBe(true);
+    expect(result.fields).toMatchObject({ name: "pastreet", logo: "https://pastreet.shop/assets/pastreet-P.svg" });
+    expect(result.sources).toEqual({ name: "html", logo: "html" });
+  });
+
+  it.each([
+    ["Home | Rosie's Bakery", "Rosie's Bakery"],
+    ["Kofi's Barbers – Home", "Kofi's Barbers"],
+    ["Welcome! · Northside Plumbing", "Northside Plumbing"],
+    ["Home", null],
+    ["Welcome!", null],
+  ])("takes the business name from the title %p", (title, name) => {
+    expect(extractProfile(`<title>${title}</title>`, "https://x.example/").fields.name).toBe(name);
+  });
+
+  it("prefers markup over the title and icons", () => {
+    const html = `<title>Home | Old Name</title><link rel="apple-touch-icon" href="/touch.png">
+      <meta property="og:site_name" content="New Name"><meta property="og:image" content="/share.png">`;
+    const { fields, sources } = extractProfile(html, "https://x.example/");
+    expect(fields).toMatchObject({ name: "New Name", logo: "https://x.example/share.png" });
+    expect(sources).toMatchObject({ name: "open-graph", logo: "open-graph" });
+  });
+
+  it("uses an apple-touch-icon as the logo, but not a favicon.ico", () => {
+    expect(
+      extractProfile('<link rel="apple-touch-icon" href="/touch.png">', "https://x.example/").fields.logo
+    ).toBe("https://x.example/touch.png");
+    expect(extractProfile('<link rel="icon" href="/favicon.ico">', "https://x.example/").fields.logo).toBeNull();
+  });
+
   it("keeps opening-hours text it can't parse as raw", () => {
     const html = `<script type="application/ld+json">
       {"@context":"https://schema.org","@type":"LocalBusiness","name":"X",

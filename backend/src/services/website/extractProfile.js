@@ -304,6 +304,38 @@ function readOpenGraph($) {
   return og;
 }
 
+// Title segments that describe the page, not the business.
+const GENERIC_TITLE = /^(home(\s*page)?|welcome!?|index|untitled|main|official (web)?site|website)$/i;
+
+// The business name from <title>, for sites with no markup at all (often
+// single-page apps whose HTML is an empty shell). "Home | Rosie's Bakery"
+// gives "Rosie's Bakery"; a title that is only "Home" gives nothing.
+function readTitleName($) {
+  const title = text($("head > title").first().text());
+  if (!title) return null;
+  const parts = title
+    .split(/\s+[|–—·:-]\s+|\s*[|–—·]\s*/)
+    .map((part) => part.trim())
+    .filter((part) => part && !GENERIC_TITLE.test(part));
+  return parts[0] || null;
+}
+
+// A logo from the page's icons: an apple-touch-icon, or an SVG/PNG icon.
+// A plain favicon.ico is too small to use as a logo, so it is skipped.
+function readIconLogo($, baseUrl) {
+  const touch = $('link[rel~="apple-touch-icon"]').first().attr("href");
+  if (touch) return absolute(touch, baseUrl);
+
+  let logo = null;
+  $('link[rel~="icon"]').each((_, el) => {
+    const href = $(el).attr("href");
+    const type = ($(el).attr("type") || "").toLowerCase();
+    const isImage = type === "image/svg+xml" || type === "image/png" || /\.(svg|png)(\?|#|$)/i.test(href || "");
+    if (!logo && isImage) logo = absolute(href, baseUrl);
+  });
+  return logo;
+}
+
 function readFeedUrl($, baseUrl) {
   const href = $(
     'link[rel~="alternate"][type="application/rss+xml"], link[rel~="alternate"][type="application/atom+xml"]'
@@ -315,7 +347,8 @@ function readFeedUrl($, baseUrl) {
 
 /**
  * Extract the business details a site exposes through schema.org markup
- * (JSON-LD or microdata) and Open Graph tags. Pure: no network access.
+ * (JSON-LD or microdata) and Open Graph tags, falling back to the page
+ * <title> for the name and its icons for the logo. Pure: no network access.
  *
  * Field names line up with BusinessProfile (#04) so the website connection
  * (#03.1) can map them across directly.
@@ -347,11 +380,13 @@ function extractProfile(html, baseUrl) {
   set("name", text(business.name), businessSource);
   set("name", og.site_name, "open-graph");
   set("name", og.title, "open-graph");
+  set("name", readTitleName($), "html");
   set("address", normaliseAddress(business.address), businessSource);
   set("hours", normaliseHours(business), businessSource);
   set("services", normaliseServices(business), businessSource);
   set("logo", normaliseLogo(business, baseUrl), businessSource);
   set("logo", absolute(og.image, baseUrl), "open-graph");
+  set("logo", readIconLogo($, baseUrl), "html");
   if (fields.contentFeedUrl) sources.contentFeedUrl = "html";
 
   const found = ["name", "address", "hours", "services", "logo"].some((k) => fields[k]);

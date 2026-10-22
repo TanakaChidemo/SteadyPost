@@ -195,9 +195,13 @@ paths:
       description: >
         Fetches the page and extracts name, address, opening hours, services,
         logo and content feed URL from schema.org markup (JSON-LD or
-        microdata) and Open Graph tags. Used to prefill onboarding. Private,
-        loopback and reserved addresses are refused. Rate limited to 20
-        requests per 15 minutes.
+        microdata) and Open Graph tags. With no markup (e.g. a single-page
+        app), the name falls back to the page title and the logo to an
+        apple-touch-icon or SVG/PNG icon. A bare domain ("rosiesbakery.co.uk")
+        is read as https. A timeout is retried once, for hosts that wake
+        sleeping sites on the first request. Used to prefill onboarding.
+        Private, loopback and reserved addresses are refused. Rate limited to
+        20 requests per 15 minutes.
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
