@@ -73,4 +73,30 @@ describe("POST /api/v1/website/preview", () => {
     expect(res.status).toBe(status);
     expect(res.body).toEqual({ error: `failed: ${code}`, code });
   });
+
+  it("retries once after a timeout, for sites that were asleep", async () => {
+    fetchPage
+      .mockRejectedValueOnce(new WebsiteFetchError("TIMEOUT", "slow"))
+      .mockResolvedValueOnce({ url: "https://sleepy.example/", html: "<title>Sleepy Cafe</title>" });
+
+    const res = await post({ url: "sleepy.example" });
+
+    expect(res.status).toBe(200);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(res.body.fields.name).toBe("Sleepy Cafe");
+  });
+
+  it("gives up after the retry also times out", async () => {
+    fetchPage.mockRejectedValue(new WebsiteFetchError("TIMEOUT", "slow"));
+    const res = await post({ url: "sleepy.example" });
+    expect(res.status).toBe(504);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("doesn't retry other failures", async () => {
+    fetchPage.mockRejectedValue(new WebsiteFetchError("NETWORK", "unreachable"));
+    const res = await post({ url: "gone.example" });
+    expect(res.status).toBe(502);
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+  });
 });

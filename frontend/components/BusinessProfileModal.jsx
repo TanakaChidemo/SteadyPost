@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
+import { normaliseWebsiteUrl, websiteInputProps } from "../lib/websiteUrl";
 
 const PRESET_TONES = ["Professional", "Inspiring", "Tech-Forward", "Casual", "Authoritative", "Bold", "Playful"];
 const PRESET_GOALS = ["Brand Awareness", "Lead Generation", "Community Growth", "Thought Leadership"];
@@ -127,7 +128,7 @@ export function BusinessProfileModal() {
       await api.businessProfile.update({
         name: name.trim() || undefined,
         businessType: businessType.trim(),
-        websiteUrl: websiteUrl.trim(),
+        websiteUrl: normaliseWebsiteUrl(websiteUrl),
         offer: offer.trim(),
         audience: audience.trim(),
         tone: selectedTones,
@@ -165,7 +166,7 @@ export function BusinessProfileModal() {
       const res = await api.workspaces.create({
         name: profileName,
         businessType: businessType.trim() || undefined,
-        websiteUrl: websiteUrl.trim() || undefined,
+        websiteUrl: normaliseWebsiteUrl(websiteUrl) || undefined,
         offer: offer.trim() || undefined,
         audience: audience.trim() || undefined,
         tone: selectedTones,
@@ -321,8 +322,8 @@ export function BusinessProfileModal() {
                     Website / Business URL
                   </label>
                   <input
-                    type="url"
-                    placeholder="e.g. https://mybusiness.com"
+                    {...websiteInputProps}
+                    placeholder="e.g. mybusiness.com"
                     value={websiteUrl}
                     onChange={(e) => setWebsiteUrl(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"

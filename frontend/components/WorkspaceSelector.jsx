@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
+import { normaliseWebsiteUrl, websiteInputProps } from "../lib/websiteUrl";
 import { PlusIcon } from "./Icons";
 
 export function WorkspaceSelector() {
@@ -51,7 +52,7 @@ export function WorkspaceSelector() {
       const res = await api.workspaces.create({
         name: newWorkspaceName.trim(),
         businessType: newBusinessType.trim() || undefined,
-        websiteUrl: newWebsiteUrl.trim() || undefined,
+        websiteUrl: normaliseWebsiteUrl(newWebsiteUrl) || undefined,
         offer: newOffer.trim() || undefined,
         audience: newAudience.trim() || undefined,
       });
@@ -234,8 +235,8 @@ export function WorkspaceSelector() {
                   Website URL (Optional)
                 </label>
                 <input
-                  type="url"
-                  placeholder="e.g. https://apexapparel.com"
+                  {...websiteInputProps}
+                  placeholder="e.g. apexapparel.com"
                   value={newWebsiteUrl}
                   onChange={(e) => setNewWebsiteUrl(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"

@@ -33,24 +33,38 @@ async function runMigration() {
   };
 
   // 1. Migrate Users & Provision Workspaces
+  //
+  // Legacy (pre-workspace) data belongs to the user personally, so it is
+  // re-keyed to the workspace the user *owns* — never to `activeWorkspaceId`,
+  // which may point at a workspace they joined or switched to, and would
+  // expose their social accounts (Page tokens) and drafts to its members.
+  const ownedWorkspaceByUser = new Map();
   const users = await mongoose.connection.collection("users").find({}).toArray();
   console.log(`Found ${users.length} user(s) to process.`);
 
   for (const user of users) {
     summary.usersProcessed++;
-    let workspaceId = user.activeWorkspaceId;
 
-    if (workspaceId) {
-      const existingWs = await workspaceModel.findById(workspaceId);
-      if (!existingWs) workspaceId = null;
+    let activeWorkspaceId = user.activeWorkspaceId;
+    if (activeWorkspaceId) {
+      const existingWs = await workspaceModel.findById(activeWorkspaceId);
+      if (!existingWs) activeWorkspaceId = null;
     }
 
-    if (!workspaceId) {
-      // Check if user already owns a workspace
-      const existingOwnedWs = await workspaceModel.findOne({ ownerId: user._id });
-      if (existingOwnedWs) {
-        workspaceId = existingOwnedWs._id;
-      } else {
+    let workspaceId = null;
+    const existingOwnedWs = await workspaceModel.findOne({ ownerId: user._id });
+    if (existingOwnedWs) {
+      workspaceId = existingOwnedWs._id;
+    } else {
+      // A user already working in someone else's workspace only needs one of
+      // their own if they have legacy data to put in it.
+      const hasLegacyData =
+        (await mongoose.connection
+          .collection("socialaccounts")
+          .countDocuments({ ownerId: user._id, workspaceId: null }, { limit: 1 })) > 0 ||
+        (await mongoose.connection.collection("contentdrafts").countDocuments({ ownerId: user._id }, { limit: 1 })) > 0;
+
+      if (!activeWorkspaceId || hasLegacyData) {
         const newWs = await workspaceModel.create({
           name: `${user.name || "Default"}'s Workspace`,
           ownerId: user._id,
@@ -60,9 +74,14 @@ async function runMigration() {
         summary.workspacesCreated++;
         console.log(`[Workspace Created] '${newWs.name}' (${newWs._id}) for user ${user.email}`);
       }
+    }
 
+    if (!activeWorkspaceId && workspaceId) {
       await userModel.updateById(user._id, { activeWorkspaceId: workspaceId });
     }
+
+    if (!workspaceId) continue;
+    ownedWorkspaceByUser.set(user._id, workspaceId);
 
     // Ensure Owner Membership exists
     const existingMembership = await membershipModel.findOne({
@@ -113,78 +132,88 @@ async function runMigration() {
   const socialAccounts = await mongoose.connection.collection("socialaccounts").find({}).toArray();
   for (const sa of socialAccounts) {
     if (!sa.workspaceId && sa.ownerId) {
-      const owner = await userModel.findById(sa.ownerId);
-      if (owner && owner.activeWorkspaceId) {
+      const workspaceId = ownedWorkspaceByUser.get(sa.ownerId);
+      if (workspaceId) {
         await mongoose.connection
           .collection("socialaccounts")
-          .updateOne({ _id: sa._id }, { $set: { workspaceId: owner.activeWorkspaceId } });
+          .updateOne({ _id: sa._id }, { $set: { workspaceId } });
         summary.socialAccountsMigrated++;
-        console.log(`[SocialAccount Migrated] ${sa.displayName} -> workspace ${owner.activeWorkspaceId}`);
+        console.log(`[SocialAccount Migrated] ${sa.displayName} -> workspace ${workspaceId}`);
       }
     }
   }
 
   // 3. Migrate ContentDrafts & ScheduledPosts -> Posts collection
+  //
+  // A Post has a single channel, but a draft may target several platforms
+  // (one ScheduledPost row each), so each draft becomes one Post per
+  // platform. The first keeps the draft's _id; the rest get
+  // `<draftId>_<platform>`, which keeps re-runs idempotent.
   const drafts = await mongoose.connection.collection("contentdrafts").find({}).toArray();
   for (const draft of drafts) {
-    const existingPost = await postModel.findById(draft._id);
-    if (existingPost) continue;
+    const workspaceId = ownedWorkspaceByUser.get(draft.ownerId);
+    if (!workspaceId) continue;
 
-    const owner = await userModel.findById(draft.ownerId);
-    if (!owner || !owner.activeWorkspaceId) continue;
-
-    // Check for corresponding scheduled post
-    const scheduled = await mongoose.connection
+    // Latest ScheduledPost row per platform
+    const scheduledRows = await mongoose.connection
       .collection("scheduledposts")
-      .findOne({ contentDraftId: draft._id });
+      .find({ contentDraftId: draft._id })
+      .sort({ updatedAt: 1 })
+      .toArray();
+    const scheduledByPlatform = new Map(scheduledRows.map((row) => [row.platform, row]));
 
-    let status = draft.status === "published" ? "published" : "draft";
-    let externalPostId = null;
-    let scheduledAt = null;
-    let publishedAt = null;
-    let channel = (draft.platforms && draft.platforms[0]) || "facebook";
-    let socialAccountId = null;
+    const channels = [...new Set([...(draft.platforms || []), ...scheduledByPlatform.keys()])].filter(Boolean);
+    if (channels.length === 0) channels.push("facebook");
 
-    if (scheduled) {
-      if (scheduled.status === "published") {
-        status = "published";
-        publishedAt = scheduled.updatedAt || new Date();
-      } else if (scheduled.status === "publishing") {
-        status = "scheduled";
-        scheduledAt = scheduled.scheduledAt || new Date();
-      } else if (scheduled.status === "failed") {
-        status = "failed";
+    for (const [index, channel] of channels.entries()) {
+      const postId = index === 0 ? draft._id : `${draft._id}_${channel}`;
+      const existingPost = await postModel.findById(postId);
+      if (existingPost) continue;
+
+      const scheduled = scheduledByPlatform.get(channel);
+      let status = draft.status === "published" ? "published" : "draft";
+      let scheduledAt = null;
+      let publishedAt = null;
+
+      if (scheduled) {
+        if (scheduled.status === "published") {
+          status = "published";
+          publishedAt = scheduled.updatedAt || new Date();
+        } else if (scheduled.status === "publishing") {
+          status = "scheduled";
+          scheduledAt = scheduled.scheduledAt || new Date();
+        } else if (scheduled.status === "failed") {
+          status = "failed";
+        }
       }
-      externalPostId = scheduled.externalPostId || null;
-      channel = scheduled.platform || channel;
-      socialAccountId = scheduled.socialAccountId || null;
+
+      await postModel.create({
+        _id: postId,
+        workspaceId,
+        authorId: draft.ownerId,
+        channel,
+        socialAccountId: scheduled?.socialAccountId || null,
+        content: {
+          title: draft.title || "Untitled Post",
+          body: draft.body || "",
+          mediaUrls: draft.mediaUrls || [],
+          hashtags: [],
+        },
+        status,
+        scheduledAt,
+        publishedAt,
+        origin: "manual",
+        externalPostId: scheduled?.externalPostId || null,
+        errorMessage: scheduled?.errorMessage || null,
+        aiMetadata: draft.aiMetadata || {},
+        versions: draft.versions || [],
+        createdAt: draft.createdAt || new Date(),
+        updatedAt: draft.updatedAt || new Date(),
+      });
+
+      summary.postsMigrated++;
+      console.log(`[Post Migrated] Draft '${draft.title}' (${draft._id}) -> ${channel} Post ${postId} in workspace ${workspaceId}`);
     }
-
-    await postModel.create({
-      _id: draft._id,
-      workspaceId: owner.activeWorkspaceId,
-      authorId: draft.ownerId,
-      channel,
-      socialAccountId,
-      content: {
-        title: draft.title || "Untitled Post",
-        body: draft.body || "",
-        mediaUrls: draft.mediaUrls || [],
-        hashtags: [],
-      },
-      status,
-      scheduledAt,
-      publishedAt,
-      origin: "manual",
-      externalPostId,
-      aiMetadata: draft.aiMetadata || {},
-      versions: draft.versions || [],
-      createdAt: draft.createdAt || new Date(),
-      updatedAt: draft.updatedAt || new Date(),
-    });
-
-    summary.postsMigrated++;
-    console.log(`[Post Migrated] Draft '${draft.title}' (${draft._id}) -> Post in workspace ${owner.activeWorkspaceId}`);
   }
 
   console.log("\n================ MIGRATION COMPLETE ================");

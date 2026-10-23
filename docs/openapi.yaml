@@ -195,9 +195,13 @@ paths:
       description: >
         Fetches the page and extracts name, address, opening hours, services,
         logo and content feed URL from schema.org markup (JSON-LD or
-        microdata) and Open Graph tags. Used to prefill onboarding. Private,
-        loopback and reserved addresses are refused. Rate limited to 20
-        requests per 15 minutes.
+        microdata) and Open Graph tags. With no markup (e.g. a single-page
+        app), the name falls back to the page title and the logo to an
+        apple-touch-icon or SVG/PNG icon. A bare domain ("rosiesbakery.co.uk")
+        is read as https. A timeout is retried once, for hosts that wake
+        sleeping sites on the first request. Used to prefill onboarding.
+        Private, loopback and reserved addresses are refused. Rate limited to
+        20 requests per 15 minutes.
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -215,6 +219,49 @@ paths:
             markup; each field is null when not found. `sources` says where
             each found field came from (json-ld, microdata, open-graph, html).
         "400": { description: Invalid payload }
+        "422": { description: URL is invalid or points to a private/reserved address }
+        "502": { description: The website failed (unreachable, HTTP error, not HTML, too large, too many redirects) }
+        "504": { description: The website took too long to respond }
+
+  /website/connection:
+    get:
+      tags: [Website]
+      summary: The current workspace's connected website and its saved fields (for onboarding prefill)
+      description: >
+        Scoped to the active workspace (or `X-Workspace-Id`). Any member of
+        the workspace can read it.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: >
+            Saved connection: `id`, `workspaceId`, `url`, `lastSyncedTime`,
+            `found`, `fields` and `sources`, in the same shape as
+            `/website/preview`.
+        "403": { description: Not a member of the requested workspace }
+        "404": { description: No website connected to this workspace }
+    put:
+      tags: [Website]
+      summary: Connect a website to the current workspace, or refresh it
+      description: >
+        Reads the site once (as `/website/preview` does) and saves the URL,
+        extracted fields and sync time as the workspace's one website
+        connection. Calling it again refreshes the saved fields. A failed
+        fetch leaves any saved connection unchanged. Owners and editors only.
+        Shares the preview rate limit (20 requests per 15 minutes).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, example: "rosiesbakery.co.uk" }
+      responses:
+        "200": { description: The saved connection (same shape as GET) }
+        "400": { description: Invalid payload }
+        "403": { description: Not a member of the workspace, or a viewer }
         "422": { description: URL is invalid or points to a private/reserved address }
         "502": { description: The website failed (unreachable, HTTP error, not HTML, too large, too many redirects) }
         "504": { description: The website took too long to respond }

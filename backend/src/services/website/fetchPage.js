@@ -130,6 +130,11 @@ function createFetcher({
         url,
         {
           lookup: guardedLookup,
+          // Node tries each of a host's IPv4/IPv6 addresses for only 250ms by
+          // default. A site further away than that fails with ETIMEDOUT when
+          // its other address family is unreachable (e.g. IPv6 inside Docker),
+          // so give each address longer. The overall deadline still applies.
+          autoSelectFamilyAttemptTimeout: 2000,
           headers: {
             "User-Agent": USER_AGENT,
             Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
