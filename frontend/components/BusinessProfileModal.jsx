@@ -13,7 +13,8 @@ import {
   knownKeys,
   profileErrorMessage,
 } from "../lib/profileOptions";
-import { ChipPicker, Field, LocationFields, inputClass } from "./ProfileFields";
+import { nameSuggestion, websiteReadError } from "../lib/websitePrefill";
+import { ChipPicker, Field, LocationFields, NameSuggestion, inputClass } from "./ProfileFields";
 
 /** Edits the current workspace's profile. New profiles go through the onboarding wizard. */
 export function BusinessProfileModal() {
@@ -34,6 +35,9 @@ export function BusinessProfileModal() {
   const [selectedTones, setSelectedTones] = useState(["professional"]);
   const [selectedGoals, setSelectedGoals] = useState(["brand_awareness"]);
   const [activeChannels, setActiveChannels] = useState([]);
+  // The website as last saved, and the name it gives (#04.1).
+  const [savedWebsiteUrl, setSavedWebsiteUrl] = useState("");
+  const [websiteName, setWebsiteName] = useState(null);
 
   // Notification Settings
   const [dailyCap, setDailyCap] = useState(5);
@@ -50,10 +54,13 @@ export function BusinessProfileModal() {
     Promise.all([
       api.businessProfile.get().catch(() => null),
       api.businessProfile.getNotifications().catch(() => null),
+      api.website.getConnection().catch(() => null),
     ])
-      .then(([prof, notif]) => {
+      .then(([prof, notif, connection]) => {
         if (!mounted) return;
+        setWebsiteName(connection?.fields?.name || null);
         if (prof) {
+          setSavedWebsiteUrl(normaliseWebsiteUrl(prof.websiteUrl || ""));
           setName(prof.name || currentWorkspace?.name || "");
           setBusinessType(prof.businessType || "");
           setWebsiteUrl(prof.websiteUrl || currentWorkspace?.websiteUrl || "");
@@ -113,6 +120,17 @@ export function BusinessProfileModal() {
       await fetchWorkspaces();
       addToast("success", "Business profile & settings saved!");
       setBusinessProfileOpen(false);
+
+      // Read a new or changed website so the workspace's connection (#03.1)
+      // stays current. The profile is already saved, so a failure only warns.
+      const url = normaliseWebsiteUrl(websiteUrl);
+      if (url && url !== savedWebsiteUrl) {
+        api.website
+          .connect(url)
+          .catch((err) =>
+            addToast("info", `Saved, but we couldn't read your website: ${websiteReadError(err)}`)
+          );
+      }
     } catch (err) {
       addToast("error", profileErrorMessage(err, "Failed to update profile"));
     } finally {
@@ -198,6 +216,9 @@ export function BusinessProfileModal() {
                     onChange={(e) => setName(e.target.value)}
                     className={inputClass}
                   />
+                  {nameSuggestion(name, websiteName) && (
+                    <NameSuggestion name={nameSuggestion(name, websiteName)} onUse={() => setName(websiteName.trim())} />
+                  )}
                 </Field>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -49,6 +49,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm install
       - run: npm run lint
+      - run: npm test
       - run: npm run build
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:4000/api/v1
