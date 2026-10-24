@@ -4,21 +4,22 @@ import React, { useState, useEffect } from "react";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
 import { normaliseWebsiteUrl, websiteInputProps } from "../lib/websiteUrl";
+import {
+  CHANNELS,
+  EMPTY_LOCATION,
+  GOALS,
+  LIMITS,
+  TONES,
+  knownKeys,
+  profileErrorMessage,
+} from "../lib/profileOptions";
+import { ChipPicker, Field, LocationFields, inputClass } from "./ProfileFields";
 
-const PRESET_TONES = ["Professional", "Inspiring", "Tech-Forward", "Casual", "Authoritative", "Bold", "Playful"];
-const PRESET_GOALS = ["Brand Awareness", "Lead Generation", "Community Growth", "Thought Leadership"];
-
+/** Edits the current workspace's profile. New profiles go through the onboarding wizard. */
 export function BusinessProfileModal() {
-  const {
-    isBusinessProfileOpen,
-    setBusinessProfileOpen,
-    currentWorkspace,
-    fetchWorkspaces,
-    switchWorkspace,
-    addToast,
-  } = useAppStore();
+  const { isBusinessProfileOpen, setBusinessProfileOpen, currentWorkspace, fetchWorkspaces, openOnboarding, addToast } =
+    useAppStore();
 
-  const [isNewMode, setIsNewMode] = useState(false);
   const [activeTab, setActiveTab] = useState("profile"); // "profile" | "notifications"
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -29,8 +30,10 @@ export function BusinessProfileModal() {
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [offer, setOffer] = useState("");
   const [audience, setAudience] = useState("");
+  const [location, setLocation] = useState(EMPTY_LOCATION);
   const [selectedTones, setSelectedTones] = useState(["professional"]);
   const [selectedGoals, setSelectedGoals] = useState(["brand_awareness"]);
+  const [activeChannels, setActiveChannels] = useState([]);
 
   // Notification Settings
   const [dailyCap, setDailyCap] = useState(5);
@@ -43,7 +46,6 @@ export function BusinessProfileModal() {
 
     let mounted = true;
     setLoading(true);
-    setIsNewMode(false);
 
     Promise.all([
       api.businessProfile.get().catch(() => null),
@@ -57,8 +59,12 @@ export function BusinessProfileModal() {
           setWebsiteUrl(prof.websiteUrl || currentWorkspace?.websiteUrl || "");
           setOffer(prof.offer || "");
           setAudience(prof.audience || "");
-          setSelectedTones(prof.tone && prof.tone.length > 0 ? prof.tone : ["professional"]);
-          setSelectedGoals(prof.goals && prof.goals.length > 0 ? prof.goals : ["brand_awareness"]);
+          setLocation({ ...EMPTY_LOCATION, ...prof.location });
+          const tones = knownKeys(prof.tone, TONES);
+          const goals = knownKeys(prof.goals, GOALS);
+          setSelectedTones(tones.length > 0 ? tones : ["professional"]);
+          setSelectedGoals(goals.length > 0 ? goals : ["brand_awareness"]);
+          setActiveChannels(knownKeys(prof.activeChannels, CHANNELS));
         }
         if (notif) {
           setDailyCap(notif.dailyCap || 5);
@@ -78,50 +84,8 @@ export function BusinessProfileModal() {
 
   if (!isBusinessProfileOpen) return null;
 
-  function toggleTone(tone) {
-    const lower = tone.toLowerCase();
-    if (selectedTones.includes(lower)) {
-      setSelectedTones(selectedTones.filter((t) => t !== lower));
-    } else {
-      setSelectedTones([...selectedTones, lower]);
-    }
-  }
-
-  function toggleGoal(goal) {
-    const key = goal.toLowerCase().replace(/\s+/g, "_");
-    if (selectedGoals.includes(key)) {
-      setSelectedGoals(selectedGoals.filter((g) => g !== key));
-    } else {
-      setSelectedGoals([...selectedGoals, key]);
-    }
-  }
-
-  function switchToNewMode() {
-    setIsNewMode(true);
-    setName("");
-    setBusinessType("");
-    setWebsiteUrl("");
-    setOffer("");
-    setAudience("");
-    setSelectedTones(["professional"]);
-    setSelectedGoals(["brand_awareness"]);
-    setActiveTab("profile");
-  }
-
-  function switchToEditMode() {
-    setIsNewMode(false);
-    if (currentWorkspace) {
-      setName(currentWorkspace.name || "");
-      setBusinessType(currentWorkspace.businessType || "");
-      setWebsiteUrl(currentWorkspace.websiteUrl || "");
-    }
-  }
-
   async function handleSave(e) {
     if (e) e.preventDefault();
-    if (isNewMode) {
-      return handleCreateNewProfile();
-    }
 
     try {
       setSaving(true);
@@ -131,8 +95,10 @@ export function BusinessProfileModal() {
         websiteUrl: normaliseWebsiteUrl(websiteUrl),
         offer: offer.trim(),
         audience: audience.trim(),
+        location,
         tone: selectedTones,
         goals: selectedGoals,
+        activeChannels,
       });
 
       await api.businessProfile.updateNotifications({
@@ -148,40 +114,7 @@ export function BusinessProfileModal() {
       addToast("success", "Business profile & settings saved!");
       setBusinessProfileOpen(false);
     } catch (err) {
-      addToast("error", err.response?.data?.error || "Failed to update profile");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleCreateNewProfile() {
-    const profileName = name.trim() || businessType.trim();
-    if (!profileName) {
-      addToast("error", "Please enter a Profile Name or Business Type");
-      return;
-    }
-
-    try {
-      setSaving(true);
-      const res = await api.workspaces.create({
-        name: profileName,
-        businessType: businessType.trim() || undefined,
-        websiteUrl: normaliseWebsiteUrl(websiteUrl) || undefined,
-        offer: offer.trim() || undefined,
-        audience: audience.trim() || undefined,
-        tone: selectedTones,
-        goals: selectedGoals,
-      });
-
-      await fetchWorkspaces();
-      if (res.workspace?.id) {
-        await switchWorkspace(res.workspace.id);
-      }
-
-      addToast("success", `Created new profile "${profileName}"!`);
-      setBusinessProfileOpen(false);
-    } catch (err) {
-      addToast("error", err.response?.data?.error || "Failed to create business profile");
+      addToast("error", profileErrorMessage(err, "Failed to update profile"));
     } finally {
       setSaving(false);
     }
@@ -196,38 +129,24 @@ export function BusinessProfileModal() {
             <div className="flex items-center gap-2">
               <span className="text-xl">🏢</span>
               <h2 className="text-base font-bold text-white">
-                {isNewMode
-                  ? "Create New Business Profile"
-                  : `${name || currentWorkspace?.name || "Business"} Profile`}
+                {`${name || currentWorkspace?.name || "Business"} Profile`}
               </h2>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              {isNewMode
-                ? "Set up a new venture with isolated social channels, calendar, and AI brand voice."
-                : "Configures AI generation tone, relevance scoring, and notification budget."}
+              Configures AI generation tone, relevance scoring, and notification budget.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            {!isNewMode ? (
-              <button
-                type="button"
-                onClick={switchToNewMode}
-                className="px-2.5 py-1 rounded-md text-xs font-semibold bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600/30 transition flex items-center gap-1"
-                title="Create an additional business profile"
-              >
-                <span>+</span>
-                <span>New Profile</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={switchToEditMode}
-                className="px-2.5 py-1 rounded-md text-xs font-medium text-slate-400 hover:text-white transition"
-              >
-                ← Back to Current
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => openOnboarding("create")}
+              className="px-2.5 py-1 rounded-md text-xs font-semibold bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600/30 transition flex items-center gap-1"
+              title="Create an additional business profile"
+            >
+              <span>+</span>
+              <span>New Profile</span>
+            </button>
             <button
               onClick={() => setBusinessProfileOpen(false)}
               className="w-8 h-8 rounded-lg border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center hover:bg-slate-900 transition"
@@ -249,18 +168,16 @@ export function BusinessProfileModal() {
           >
             Brand & Audience Context
           </button>
-          {!isNewMode && (
-            <button
-              onClick={() => setActiveTab("notifications")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeTab === "notifications"
-                  ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Notification Budget
-            </button>
-          )}
+          <button
+            onClick={() => setActiveTab("notifications")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              activeTab === "notifications"
+                ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            Notification Budget
+          </button>
         </div>
 
         {loading ? (
@@ -271,136 +188,88 @@ export function BusinessProfileModal() {
           <form onSubmit={handleSave} className="space-y-4">
             {activeTab === "profile" && (
               <>
-                {/* Profile Name Field */}
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Profile / Business Name *
-                  </label>
+                <Field label="Profile / Business Name *" hint="This is the label displayed in your top dropdown menu.">
                   <input
                     type="text"
                     required
+                    maxLength={LIMITS.name}
                     placeholder="e.g. Apex Apparel, SteadyPost Marketing, Gen Venture"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    className={inputClass}
                   />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    This is the label displayed in your top dropdown menu.
-                  </p>
-                </div>
+                </Field>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Business Type / Industry
-                    </label>
+                  <Field label="Business Type / Industry">
                     <input
                       type="text"
+                      maxLength={LIMITS.businessType}
                       placeholder="e.g. AI SaaS, Bakery, Marketing Agency"
                       value={businessType}
                       onChange={(e) => setBusinessType(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                      className={inputClass}
                     />
-                  </div>
+                  </Field>
 
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Target Audience
-                    </label>
+                  <Field label="Target Audience">
                     <input
                       type="text"
+                      maxLength={LIMITS.audience}
                       placeholder="e.g. Founders, Local customers, Gen-Z"
                       value={audience}
                       onChange={(e) => setAudience(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                      className={inputClass}
                     />
-                  </div>
+                  </Field>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Website / Business URL
-                  </label>
+                <Field
+                  label="Website / Business URL"
+                  hint="Links this profile to your online store, landing page, or company website."
+                >
                   <input
                     {...websiteInputProps}
                     placeholder="e.g. mybusiness.com"
                     value={websiteUrl}
                     onChange={(e) => setWebsiteUrl(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    className={inputClass}
                   />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Links this profile to your online store, landing page, or company website.
-                  </p>
-                </div>
+                </Field>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Core Offer / Value Proposition
-                  </label>
+                <Field label="Core Offer / Value Proposition">
                   <textarea
                     rows={2}
+                    maxLength={LIMITS.offer}
                     placeholder="e.g. Automated social scheduling and AI copywriting tools for creators."
                     value={offer}
                     onChange={(e) => setOffer(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    className={inputClass}
                   />
-                </div>
+                </Field>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                    Brand Tones (Feeds AI Caption Generator)
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {PRESET_TONES.map((tone) => {
-                      const lower = tone.toLowerCase();
-                      const isSelected = selectedTones.includes(lower);
-                      return (
-                        <button
-                          type="button"
-                          key={tone}
-                          onClick={() => toggleTone(tone)}
-                          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${
-                            isSelected
-                              ? "bg-indigo-600 text-white"
-                              : "bg-slate-900 text-slate-400 border border-slate-800 hover:border-slate-700"
-                          }`}
-                        >
-                          {tone}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <LocationFields value={location} onChange={setLocation} />
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                    Marketing Goals
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {PRESET_GOALS.map((goal) => {
-                      const key = goal.toLowerCase().replace(/\s+/g, "_");
-                      const isSelected = selectedGoals.includes(key);
-                      return (
-                        <button
-                          type="button"
-                          key={goal}
-                          onClick={() => toggleGoal(goal)}
-                          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${
-                            isSelected
-                              ? "bg-purple-600 text-white"
-                              : "bg-slate-900 text-slate-400 border border-slate-800 hover:border-slate-700"
-                          }`}
-                        >
-                          {goal}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <Field label="Brand Tones (Feeds AI Caption Generator)">
+                  <ChipPicker options={TONES} selected={selectedTones} onChange={setSelectedTones} />
+                </Field>
+
+                <Field label="Marketing Goals">
+                  <ChipPicker
+                    options={GOALS}
+                    selected={selectedGoals}
+                    onChange={setSelectedGoals}
+                    activeClass="bg-purple-600 text-white"
+                  />
+                </Field>
+
+                <Field label="Active Channels" hint="The channels this profile posts to.">
+                  <ChipPicker options={CHANNELS} selected={activeChannels} onChange={setActiveChannels} />
+                </Field>
               </>
             )}
 
-            {activeTab === "notifications" && !isNewMode && (
+            {activeTab === "notifications" && (
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">
@@ -462,54 +331,21 @@ export function BusinessProfileModal() {
             )}
 
             {/* Actions */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-800/80 mt-6">
-              {!isNewMode ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleCreateNewProfile}
-                    disabled={saving}
-                    className="w-full sm:w-auto px-3.5 py-2 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 text-xs font-medium transition disabled:opacity-50 flex items-center justify-center gap-1.5"
-                  >
-                    <span>+</span>
-                    <span>Create as New Profile</span>
-                  </button>
-
-                  <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setBusinessProfileOpen(false)}
-                      className="px-4 py-2 rounded-lg border border-slate-800 text-xs text-slate-300 hover:bg-slate-900 transition"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={saving}
-                      className="px-5 py-2 rounded-lg gradient-brand text-xs font-semibold text-white hover:opacity-95 transition disabled:opacity-50"
-                    >
-                      {saving ? "Saving..." : "Save Profile"}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="flex items-center justify-end gap-2.5 w-full">
-                  <button
-                    type="button"
-                    onClick={() => setIsNewMode(false)}
-                    className="px-4 py-2 rounded-lg border border-slate-800 text-xs text-slate-300 hover:bg-slate-900 transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={saving || (!name.trim() && !businessType.trim())}
-                    className="px-5 py-2 rounded-lg gradient-brand text-xs font-semibold text-white hover:opacity-95 transition disabled:opacity-50"
-                  >
-                    {saving ? "Creating..." : "Create Profile"}
-                  </button>
-                </div>
-              )}
+            <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-800/80 mt-6">
+              <button
+                type="button"
+                onClick={() => setBusinessProfileOpen(false)}
+                className="px-4 py-2 rounded-lg border border-slate-800 text-xs text-slate-300 hover:bg-slate-900 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-5 py-2 rounded-lg gradient-brand text-xs font-semibold text-white hover:opacity-95 transition disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save Profile"}
+              </button>
             </div>
           </form>
         )}

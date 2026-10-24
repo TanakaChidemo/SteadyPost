@@ -5,16 +5,7 @@ const membershipModel = require("../models/membership.model");
 const businessProfileModel = require("../models/businessProfile.model");
 const notificationSettingsModel = require("../models/notificationSettings.model");
 const userModel = require("../models/user.model");
-
-const createWorkspaceSchema = z.object({
-  name: z.string().optional(),
-  businessType: z.string().optional(),
-  websiteUrl: z.string().optional(),
-  offer: z.string().optional(),
-  audience: z.string().optional(),
-  tone: z.array(z.string()).optional(),
-  goals: z.array(z.string()).optional(),
-});
+const { profileFieldsSchema } = require("../validation/businessProfile");
 
 const inviteMemberSchema = z.object({
   email: z.string().email(),
@@ -39,6 +30,7 @@ async function list(req, res) {
       businessType: prof?.businessType || "",
       websiteUrl: prof?.websiteUrl || "",
       tone: prof?.tone || [],
+      onboardingComplete: businessProfileModel.isOnboardingComplete(prof),
     };
   });
 
@@ -46,7 +38,7 @@ async function list(req, res) {
 }
 
 async function create(req, res) {
-  const parsed = createWorkspaceSchema.safeParse(req.body);
+  const parsed = profileFieldsSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
   }
@@ -57,11 +49,14 @@ async function create(req, res) {
     websiteUrl = "",
     offer = "",
     audience = "",
+    location,
     tone = ["professional"],
     goals = ["brand_awareness"],
+    activeChannels = [],
+    onboardingCompleted,
   } = parsed.data;
 
-  const profileName = (name && name.trim()) || (businessType && businessType.trim()) || "New Business Profile";
+  const profileName = name || businessType || "New Business Profile";
 
   const workspace = await workspaceModel.create({
     name: profileName,
@@ -80,11 +75,14 @@ async function create(req, res) {
   const profile = await businessProfileModel.create({
     workspaceId: workspace.id,
     businessType: businessType || profileName,
-    websiteUrl: websiteUrl ? websiteUrl.trim() : "",
+    websiteUrl,
     offer,
     audience,
+    location,
     tone,
     goals,
+    activeChannels,
+    onboardingCompletedAt: onboardingCompleted ? new Date() : null,
   });
 
   await notificationSettingsModel.create({
