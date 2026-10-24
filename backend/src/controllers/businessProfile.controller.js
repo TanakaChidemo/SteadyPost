@@ -1,6 +1,17 @@
 const businessProfileModel = require("../models/businessProfile.model");
 const notificationSettingsModel = require("../models/notificationSettings.model");
 const workspaceModel = require("../models/workspace.model");
+const { profileFieldsSchema } = require("../validation/businessProfile");
+
+// The profile's name is the workspace's name, so it's read from and saved to
+// the workspace.
+function toProfileResponse(profile, workspace) {
+  return {
+    ...profile,
+    name: workspace?.name || profile.businessType || "Business Profile",
+    onboardingComplete: businessProfileModel.isOnboardingComplete(profile),
+  };
+}
 
 async function getProfile(req, res) {
   let profile = await businessProfileModel.findByWorkspaceId(req.workspaceId);
@@ -15,41 +26,27 @@ async function getProfile(req, res) {
     });
   }
 
-  return res.json({
-    ...profile,
-    name: workspace?.name || profile.businessType || "Business Profile",
-  });
+  return res.json(toProfileResponse(profile, workspace));
 }
 
 async function updateProfile(req, res) {
-  if (req.body.name && typeof req.body.name === "string" && req.body.name.trim()) {
-    await workspaceModel.updateById(req.workspaceId, { name: req.body.name.trim() });
+  const parsed = profileFieldsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
   }
 
-  const allowed = [
-    "businessType",
-    "websiteUrl",
-    "offer",
-    "audience",
-    "location",
-    "tone",
-    "goals",
-    "activeChannels",
-  ];
-  const payload = {};
-  for (const key of allowed) {
-    if (req.body[key] !== undefined) {
-      payload[key] = req.body[key];
-    }
+  const { name, onboardingCompleted, ...fields } = parsed.data;
+  if (name) {
+    await workspaceModel.updateById(req.workspaceId, { name });
+  }
+  if (onboardingCompleted) {
+    fields.onboardingCompletedAt = new Date();
   }
 
-  const updated = await businessProfileModel.upsert(req.workspaceId, payload);
+  const updated = await businessProfileModel.upsert(req.workspaceId, fields);
   const workspace = await workspaceModel.findById(req.workspaceId);
 
-  return res.json({
-    ...updated,
-    name: workspace?.name || updated.businessType,
-  });
+  return res.json(toProfileResponse(updated, workspace));
 }
 
 async function getNotificationSettings(req, res) {
