@@ -1,14 +1,40 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import Link from "next/link";
 import { useAppStore } from "../lib/store";
 import { SparklesIcon, PlusIcon, UsersIcon } from "./Icons";
 import { WorkspaceSelector } from "./WorkspaceSelector";
 import { BusinessProfileModal } from "./BusinessProfileModal";
+import { OnboardingWizard } from "./OnboardingWizard";
 
 export function Navbar() {
-  const { user, logout, setAuthModalOpen, setAiModalOpen, setBusinessProfileOpen, socialAccounts } = useAppStore();
+  const {
+    user,
+    logout,
+    setAuthModalOpen,
+    setAiModalOpen,
+    socialAccounts,
+    currentWorkspace,
+    onboarding,
+    onboardingDismissed,
+    openOnboarding,
+  } = useAppStore();
+
+  // Send owners and editors of a workspace that hasn't been onboarded through
+  // the wizard. Viewers can't save a profile, so they're left alone.
+  const workspaceId = currentWorkspace?.id || currentWorkspace?._id;
+  const needsOnboarding =
+    Boolean(user && workspaceId) &&
+    currentWorkspace.onboardingComplete === false &&
+    ["owner", "editor"].includes(currentWorkspace.role) &&
+    !onboardingDismissed.includes(workspaceId);
+
+  useEffect(() => {
+    if (needsOnboarding && !onboarding) openOnboarding("complete");
+    // Only re-check when the workspace or its status changes, not on close.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsOnboarding, workspaceId]);
 
   return (
     <>
@@ -87,6 +113,7 @@ export function Navbar() {
       </div>
     </header>
     <BusinessProfileModal />
+    <OnboardingWizard />
     </>
   );
 }

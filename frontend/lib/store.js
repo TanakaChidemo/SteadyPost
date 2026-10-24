@@ -17,7 +17,12 @@ export const useAppStore = create((set, get) => ({
   currentWorkspace: null,
   businessProfile: null,
   isBusinessProfileOpen: false,
-  isCreateWorkspaceOpen: false,
+  // Onboarding wizard (#04): null when closed, otherwise { mode } where mode
+  // is "create" (new workspace) or "complete" (finish the current one).
+  onboarding: null,
+  // Workspaces whose onboarding was put off this session, so it doesn't
+  // reopen on every workspace switch.
+  onboardingDismissed: [],
   drafts: [],
   activeDraft: null,
   socialAccounts: [],
@@ -133,7 +138,13 @@ export const useAppStore = create((set, get) => ({
   setActiveDraft: (draft) => set({ activeDraft: draft }),
   setSocialAccounts: (accounts) => set({ socialAccounts: accounts }),
   setBusinessProfileOpen: (open) => set({ isBusinessProfileOpen: open }),
-  setCreateWorkspaceOpen: (open) => set({ isCreateWorkspaceOpen: open }),
+  openOnboarding: (mode) => set({ onboarding: { mode }, isBusinessProfileOpen: false }),
+  closeOnboarding: () => set({ onboarding: null }),
+  dismissOnboarding: (workspaceId) =>
+    set((state) => ({
+      onboarding: null,
+      onboardingDismissed: [...state.onboardingDismissed, workspaceId],
+    })),
 
   addToast: (type, text) => {
     const id = `toast_${Date.now()}_${Math.random()}`;
