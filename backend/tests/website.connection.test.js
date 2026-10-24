@@ -13,6 +13,7 @@ const workspaceModel = require("../src/models/workspace.model");
 const membershipModel = require("../src/models/membership.model");
 const userModel = require("../src/models/user.model");
 const websiteConnectionModel = require("../src/models/websiteConnection.model");
+const businessProfileModel = require("../src/models/businessProfile.model");
 
 jest.setTimeout(30000);
 
@@ -84,7 +85,7 @@ describe("Website connection per workspace (F24 #03.1)", () => {
   });
 
   it("connects a website and saves the extracted fields to the workspace", async () => {
-    fetchPage.mockResolvedValue(bakeryPage("Rosie's Bakery"));
+    fetchPage.mockResolvedValue(bakeryPage("Rosie's Bakery", ',"description":"Cakes baked fresh every morning."'));
 
     const res = await connect(ownerA, { url: "rosies.example" });
 
@@ -96,16 +97,23 @@ describe("Website connection per workspace (F24 #03.1)", () => {
       found: true,
       fields: {
         name: "Rosie's Bakery",
+        description: "Cakes baked fresh every morning.",
         address: { streetAddress: "12 Market Street", locality: "Leeds" },
         contentFeedUrl: "https://rosies.example/blog/feed.xml",
       },
-      sources: { name: "json-ld", address: "json-ld", contentFeedUrl: "html" },
+      sources: { name: "json-ld", description: "json-ld", address: "json-ld", contentFeedUrl: "html" },
     });
     expect(new Date(res.body.lastSyncedTime).getTime()).not.toBeNaN();
 
     const saved = await read(ownerA);
     expect(saved.status).toBe(200);
     expect(saved.body).toEqual(res.body);
+  });
+
+  it("never changes the workspace's name or profile, even when the site's name differs", async () => {
+    // Decided 2026-10-22: the site's name is only ever offered as a suggestion.
+    expect((await workspaceModel.findById(wsA.id)).name).toBe("Alpha Bakery");
+    expect(await businessProfileModel.findByWorkspaceId(wsA.id)).toBeNull();
   });
 
   it("re-running connect refreshes the same connection instead of adding another", async () => {
