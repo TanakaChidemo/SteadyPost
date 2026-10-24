@@ -12,6 +12,7 @@ const websiteConnectionSchema = new mongoose.Schema(
     found: { type: Boolean, default: false },
     scrapedFields: {
       name: { type: String, default: null },
+      description: { type: String, default: null },
       // { streetAddress, locality, region, postalCode, country, formatted }
       address: { type: mongoose.Schema.Types.Mixed, default: null },
       // [{ days: [String], opens, closes }] or [{ raw }]

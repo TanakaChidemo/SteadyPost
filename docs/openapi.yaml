@@ -225,9 +225,11 @@ paths:
       tags: [Website]
       summary: Read a business website once and return the details it exposes (nothing is saved)
       description: >
-        Fetches the page and extracts name, address, opening hours, services,
-        logo and content feed URL from schema.org markup (JSON-LD or
-        microdata) and Open Graph tags. With no markup (e.g. a single-page
+        Fetches the page and extracts name, description, address, opening
+        hours, services, logo and content feed URL from schema.org markup
+        (JSON-LD or microdata) and Open Graph tags. The description falls
+        back to `og:description`, then `<meta name="description">`, and is
+        cut to 1000 characters. With no markup (e.g. a single-page
         app), the name falls back to the page title and the logo to an
         apple-touch-icon or SVG/PNG icon. A bare domain ("rosiesbakery.co.uk")
         is read as https. A timeout is retried once, for hosts that wake

@@ -98,3 +98,24 @@ export function LocationFields({ value, onChange }) {
     </div>
   );
 }
+
+/**
+ * The business name the website gives, offered under the name field. It's
+ * only applied when clicked (decided 2026-10-22: never filled in automatically).
+ */
+export function NameSuggestion({ name, onUse }) {
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-400">
+      <span>
+        Your website calls you <span className="font-semibold text-slate-200">{name}</span>.
+      </span>
+      <button
+        type="button"
+        onClick={onUse}
+        className="px-2 py-1 sm:py-0.5 rounded-md border border-indigo-500/40 bg-indigo-500/10 text-indigo-300 font-medium hover:bg-indigo-500/20 transition"
+      >
+        Use this name
+      </button>
+    </div>
+  );
+}

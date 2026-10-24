@@ -14,7 +14,14 @@ import {
   knownKeys,
   profileErrorMessage,
 } from "../lib/profileOptions";
-import { ChipPicker, Field, LocationFields, inputClass } from "./ProfileFields";
+import {
+  applyPrefill,
+  filledLabels,
+  nameSuggestion,
+  prefillFromWebsite,
+  websiteReadError,
+} from "../lib/websitePrefill";
+import { ChipPicker, Field, LocationFields, NameSuggestion, inputClass } from "./ProfileFields";
 
 const STEPS = [
   { id: "website", title: "Your website", intro: "Start with your website, if you have one. You can skip this." },
@@ -49,28 +56,21 @@ function fromProfile(profile) {
   };
 }
 
-/**
- * Fill in the fields the user hasn't, from `prefill` (e.g. details read from
- * their website in #04.1). Never replaces anything already entered.
- */
-export function applyPrefill(values, prefill) {
-  if (!prefill) return values;
-  const next = { ...values, location: { ...values.location } };
-  for (const key of ["name", "businessType", "websiteUrl", "offer", "audience"]) {
-    if (!next[key].trim() && typeof prefill[key] === "string") next[key] = prefill[key];
-  }
-  for (const key of Object.keys(EMPTY_LOCATION)) {
-    if (!next.location[key].trim() && typeof prefill.location?.[key] === "string") {
-      next.location[key] = prefill.location[key];
-    }
-  }
-  return next;
-}
+// What the wizard knows about the website: the URL it last read, the name
+// the site gives (offered as a suggestion only), the fields the read filled
+// in, and why it failed if it did.
+const NO_SITE = { readUrl: "", name: null, filled: [], error: null };
 
 /**
  * Step-by-step onboarding (F01 #04). In "create" mode it creates a new
  * workspace with its profile; in "complete" mode it finishes the current
- * workspace's profile. `prefill` fills empty fields when the wizard opens.
+ * workspace's profile.
+ *
+ * Website prefill (#04.1): the site is read when the website step is left
+ * with a new URL (and in "complete" mode saved as the workspace's
+ * connection), and an already-saved connection is used when the wizard
+ * opens. Only empty fields are filled; the name is only ever suggested.
+ * `prefill` adds further values for empty fields when the wizard opens.
  */
 export function OnboardingWizard({ prefill = null }) {
   const router = useRouter();
@@ -89,7 +89,9 @@ export function OnboardingWizard({ prefill = null }) {
 
   const [step, setStep] = useState(0);
   const [values, setValues] = useState(EMPTY_VALUES);
+  const [site, setSite] = useState(NO_SITE);
   const [loading, setLoading] = useState(false);
+  const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -98,6 +100,7 @@ export function OnboardingWizard({ prefill = null }) {
     let mounted = true;
     setStep(0);
     setError("");
+    setSite(NO_SITE);
 
     if (mode === "create") {
       setValues(applyPrefill(EMPTY_VALUES, prefill));
@@ -105,10 +108,22 @@ export function OnboardingWizard({ prefill = null }) {
     }
 
     setLoading(true);
-    api.businessProfile
-      .get()
-      .then((profile) => mounted && setValues(applyPrefill(fromProfile(profile), prefill)))
-      .catch(() => mounted && setValues(applyPrefill(EMPTY_VALUES, prefill)))
+    Promise.all([api.businessProfile.get().catch(() => null), api.website.getConnection().catch(() => null)])
+      .then(([profile, connection]) => {
+        if (!mounted) return;
+        let loaded = applyPrefill(profile ? fromProfile(profile) : EMPTY_VALUES, prefill);
+        if (connection) {
+          const before = loaded;
+          loaded = applyPrefill(loaded, { websiteUrl: connection.url, ...prefillFromWebsite(connection.fields) });
+          setSite({
+            readUrl: normaliseWebsiteUrl(loaded.websiteUrl),
+            name: connection.fields?.name || null,
+            filled: filledLabels(before, loaded),
+            error: null,
+          });
+        }
+        setValues(loaded);
+      })
       .finally(() => mounted && setLoading(false));
     return () => {
       mounted = false;
@@ -125,15 +140,40 @@ export function OnboardingWizard({ prefill = null }) {
   };
   const setText = (key) => (e) => set(key)(e.target.value);
   const connected = new Set(mode === "complete" ? socialAccounts.map((a) => a.platform) : []);
+  const suggestedName = nameSuggestion(values.name, site.name);
 
   function close() {
     if (mode === "complete" && workspaceId) dismissOnboarding(workspaceId);
     else closeOnboarding();
   }
 
-  function next(e) {
+  // Read the site once per URL. A workspace that exists saves the result as
+  // its connection; a new one only previews it until the workspace is made.
+  async function readWebsite(url) {
+    setReading(true);
+    try {
+      const result = mode === "complete" ? await api.website.connect(url) : await api.website.preview(url);
+      const after = applyPrefill(values, prefillFromWebsite(result.fields));
+      setValues(after);
+      setSite({ readUrl: url, name: result.fields?.name || null, filled: filledLabels(values, after), error: null });
+    } catch (err) {
+      setSite({
+        ...NO_SITE,
+        readUrl: url,
+        error: websiteReadError(err),
+      });
+    } finally {
+      setReading(false);
+    }
+  }
+
+  async function next(e) {
     e.preventDefault();
     setError("");
+    if (current.id === "website") {
+      const url = normaliseWebsiteUrl(values.websiteUrl);
+      if (url && url !== site.readUrl) await readWebsite(url);
+    }
     if (current.id === "business" && !values.name.trim()) {
       setError("Please enter your business name.");
       return;
@@ -156,6 +196,11 @@ export function OnboardingWizard({ prefill = null }) {
         const res = await api.workspaces.create(payload);
         await fetchWorkspaces();
         if (res.workspace?.id) await switchWorkspace(res.workspace.id);
+        // Now the workspace exists, save the site it was previewed from as its
+        // connection. Not worth failing the whole setup over.
+        if (payload.websiteUrl && payload.websiteUrl === site.readUrl && !site.error) {
+          await api.website.connect(payload.websiteUrl).catch(() => {});
+        }
       } else {
         await api.businessProfile.update(payload);
         await fetchWorkspaces();
@@ -228,6 +273,17 @@ export function OnboardingWizard({ prefill = null }) {
 
               {current.id === "business" && (
                 <>
+                  {site.error ? (
+                    <p className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                      We couldn&apos;t read your website: {site.error}. Fill in your details below instead, or
+                      go back and check the address.
+                    </p>
+                  ) : site.filled.length > 0 ? (
+                    <p className="text-xs text-emerald-200 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">
+                      Filled in from your website: {site.filled.join(", ")}. Check it and change anything that&apos;s
+                      not right.
+                    </p>
+                  ) : null}
                   <Field label="Business name *" hint="Shown in the profile menu at the top of the app.">
                     <input
                       type="text"
@@ -239,6 +295,7 @@ export function OnboardingWizard({ prefill = null }) {
                       onChange={setText("name")}
                       className={inputClass}
                     />
+                    {suggestedName && <NameSuggestion name={suggestedName} onUse={() => set("name")(suggestedName)} />}
                   </Field>
                   <Field label="Type of business">
                     <input
@@ -348,6 +405,7 @@ export function OnboardingWizard({ prefill = null }) {
                     type="button"
                     onClick={() => {
                       set("websiteUrl")("");
+                      setSite(NO_SITE);
                       setStep(1);
                     }}
                     className="px-4 py-2.5 sm:py-2 rounded-lg border border-slate-800 text-xs text-slate-300 hover:bg-slate-900 transition"
@@ -367,10 +425,10 @@ export function OnboardingWizard({ prefill = null }) {
                 )}
                 <button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || reading}
                   className="px-5 py-2.5 sm:py-2 rounded-lg gradient-brand text-xs font-semibold text-white hover:opacity-95 transition disabled:opacity-50"
                 >
-                  {saving ? "Saving..." : isLast ? "Finish" : "Next"}
+                  {reading ? "Reading your website..." : saving ? "Saving..." : isLast ? "Finish" : "Next"}
                 </button>
               </div>
             </div>

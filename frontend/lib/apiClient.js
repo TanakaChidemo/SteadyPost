@@ -183,6 +183,21 @@ export const api = {
     getNotifications: () => apiClient.get("/business-profile/notifications").then((r) => r.data),
     updateNotifications: (data) => apiClient.put("/business-profile/notifications", data).then((r) => r.data),
   },
+  website: {
+    // Reads a site without saving anything (used before a workspace exists).
+    preview: (url) => apiClient.post("/website/preview", { url }).then((r) => r.data),
+    // Reads the site and saves it as the current workspace's connection.
+    connect: (url) => apiClient.put("/website/connection", { url }).then((r) => r.data),
+    // The saved connection, or null when the workspace has none.
+    getConnection: () =>
+      apiClient
+        .get("/website/connection")
+        .then((r) => r.data)
+        .catch((err) => {
+          if (err.response?.status === 404) return null;
+          throw err;
+        }),
+  },
   ai: {
     generateCaption: (data) => apiClient.post("/ai/generate-caption", data).then((r) => r.data),
     suggestHashtags: (data) => apiClient.post("/ai/suggest-hashtags", data).then((r) => r.data),
