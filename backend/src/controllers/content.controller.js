@@ -1,4 +1,5 @@
 const ContentDraft = require("../models/contentDraft.model");
+const postModel = require("../models/post.model");
 const { z } = require("zod");
 
 const draftSchema = z.object({
@@ -12,7 +13,43 @@ const draftSchema = z.object({
 
 async function list(req, res) {
   const drafts = await ContentDraft.find({ ownerId: req.user.id });
-  const sorted = [...drafts].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  let postDrafts = [];
+  try {
+    if (req.workspaceId) {
+      postDrafts = await postModel.findByWorkspaceId(req.workspaceId, { status: "draft" });
+    } else {
+      postDrafts = await postModel.Post.find({ authorId: req.user.id, status: "draft" }).lean();
+    }
+  } catch (err) {
+    postDrafts = [];
+  }
+
+  const existingTitlesAndBodies = new Set(
+    drafts.map((d) => `${(d.title || "").trim()}:::${(d.body || "").trim()}`)
+  );
+
+  const extra = [];
+  for (const p of postDrafts) {
+    const key = `${(p.content?.title || "").trim()}:::${(p.content?.body || "").trim()}`;
+    if (!existingTitlesAndBodies.has(key)) {
+      existingTitlesAndBodies.add(key);
+      extra.push({
+        _id: p.id || p._id,
+        ownerId: p.authorId,
+        title: p.content?.title || `Draft for ${p.channel}`,
+        body: p.content?.body || "",
+        platforms: [p.channel],
+        mediaUrls: p.content?.mediaUrls || [],
+        status: "draft",
+        aiMetadata: p.aiMetadata || {},
+        updatedAt: p.updatedAt || new Date(),
+        createdAt: p.createdAt || new Date(),
+      });
+    }
+  }
+
+  const all = [...drafts, ...extra];
+  const sorted = all.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
   return res.json({ items: sorted.slice(0, 100) });
 }
 

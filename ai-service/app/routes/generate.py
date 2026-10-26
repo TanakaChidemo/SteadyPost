@@ -9,6 +9,9 @@ from app.services.content_generator import (
 
 generate_bp = Blueprint("generate", __name__)
 
+ALLOWED_CHANNELS = ["twitter", "linkedin", "instagram", "facebook"]
+MAX_IDEA_LENGTH = 5000
+
 
 @generate_bp.post("/caption")
 def caption():
@@ -60,13 +63,33 @@ def repurpose():
 def variants():
     payload = request.get_json(silent=True) or {}
     idea = payload.get("idea") or payload.get("topic")
-    channels = payload.get("channels", ["twitter", "linkedin", "instagram", "facebook"])
+
+    if not idea or not isinstance(idea, str) or not idea.strip():
+        return jsonify(error="`idea` or `topic` is required"), 400
+
+    idea = idea.strip()
+    if len(idea) > MAX_IDEA_LENGTH:
+        return jsonify(error=f"Idea exceeds limit of {MAX_IDEA_LENGTH} characters"), 400
+
+    raw_channels = payload.get("channels")
+    if isinstance(raw_channels, list):
+        seen = set()
+        channels = []
+        for ch in raw_channels:
+            if isinstance(ch, str):
+                c = ch.lower().strip()
+                if c in ALLOWED_CHANNELS and c not in seen:
+                    seen.add(c)
+                    channels.append(c)
+    else:
+        channels = ["instagram", "facebook"]
+
+    if not channels:
+        channels = ["instagram", "facebook"]
+
     tone = payload.get("tone", "casual")
     business_profile = payload.get("businessProfile")
     source_post = payload.get("sourcePost")
-
-    if not idea:
-        return jsonify(error="`idea` or `topic` is required"), 400
 
     result = generate_variants(
         idea=idea,

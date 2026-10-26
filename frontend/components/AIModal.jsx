@@ -31,16 +31,16 @@ const TONE_OPTIONS = [
   { id: "casual", label: "Casual & Conversational" },
 ];
 
-export function AIModal({ onInsert, initialContent }) {
+export function AIModal({ onInsert, initialContent, onDraftCreated }) {
   const { isAiModalOpen, setAiModalOpen, addToast } = useAppStore();
   const [activeTab, setActiveTab] = useState("omnichannel"); // omnichannel | repurpose_top | caption | hashtags
 
   // --- Tab 1: Omnichannel Adaptation State ---
   const [omniIdea, setOmniIdea] = useState("");
-  const [omniChannels, setOmniChannels] = useState(["twitter", "linkedin", "instagram", "facebook"]);
+  const [omniChannels, setOmniChannels] = useState(["instagram", "facebook"]);
   const [omniTone, setOmniTone] = useState("professional");
   const [omniVariants, setOmniVariants] = useState([]);
-  const [activeOmniChannel, setActiveOmniChannel] = useState("twitter");
+  const [activeOmniChannel, setActiveOmniChannel] = useState("instagram");
   const [omniLoading, setOmniLoading] = useState(false);
   const [savingOmniDrafts, setSavingOmniDrafts] = useState(false);
   const [copiedChannel, setCopiedChannel] = useState(null);
@@ -50,10 +50,10 @@ export function AIModal({ onInsert, initialContent }) {
   const [loadingTopPosts, setLoadingTopPosts] = useState(false);
   const [hasMetricsData, setHasMetricsData] = useState(false);
   const [selectedTopPost, setSelectedTopPost] = useState(null);
-  const [repurposeChannels, setRepurposeChannels] = useState(["linkedin", "facebook", "twitter"]);
+  const [repurposeChannels, setRepurposeChannels] = useState(["instagram", "facebook"]);
   const [repurposeTone, setRepurposeTone] = useState("inspirational");
   const [repurposeVariants, setRepurposeVariants] = useState([]);
-  const [activeRepurposeChannel, setActiveRepurposeChannel] = useState("linkedin");
+  const [activeRepurposeChannel, setActiveRepurposeChannel] = useState("instagram");
   const [repurposingLoading, setRepurposingLoading] = useState(false);
   const [savingRepurposeDrafts, setSavingRepurposeDrafts] = useState(false);
 
@@ -170,6 +170,7 @@ export function AIModal({ onInsert, initialContent }) {
         },
       }));
       await api.posts.batchCreate(postsToSave);
+      onDraftCreated?.();
       addToast("success", `Saved all ${postsToSave.length} channel variants as drafts!`);
     } catch (err) {
       addToast("error", err.message || "Failed to save drafts");
@@ -230,6 +231,7 @@ export function AIModal({ onInsert, initialContent }) {
         },
       }));
       await api.posts.batchCreate(postsToSave);
+      onDraftCreated?.();
       addToast("success", `Saved ${postsToSave.length} repurposed variants as drafts!`);
     } catch (err) {
       addToast("error", err.message || "Failed to save drafts");
@@ -402,7 +404,7 @@ export function AIModal({ onInsert, initialContent }) {
                 rows={3}
                 value={omniIdea}
                 onChange={(e) => setOmniIdea(e.target.value)}
-                placeholder="e.g. We analyzed 10,000 marketing campaigns and found that consistent omnichannel posting increases customer trust by 3.4x..."
+                placeholder="e.g. Fresh sourdough baked every morning with locally sourced grains, available starting this Friday at our downtown bakery..."
                 className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 leading-relaxed font-sans"
               />
             </div>
@@ -525,8 +527,16 @@ export function AIModal({ onInsert, initialContent }) {
                         <span className="text-xs font-bold text-white capitalize flex items-center gap-1.5">
                           {currentOmniVariant.channel} Native Adaptation
                         </span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">
-                          {currentOmniVariant.model || "Core Engine"}
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded border font-medium ${
+                            currentOmniVariant.provider === "groq"
+                              ? "bg-indigo-950/70 text-indigo-300 border-indigo-700/60"
+                              : "bg-amber-950/40 text-amber-300 border-amber-800/60"
+                          }`}
+                        >
+                          {currentOmniVariant.provider === "groq"
+                            ? `Groq (${currentOmniVariant.model || "LLM"})`
+                            : "Fallback Template (AI Unavailable)"}
                         </span>
                       </div>
 
@@ -792,9 +802,22 @@ export function AIModal({ onInsert, initialContent }) {
                 {currentRepurposeVariant && (
                   <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3.5 shadow-inner">
                     <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
-                      <span className="text-xs font-bold text-white capitalize flex items-center gap-1.5">
-                        {currentRepurposeVariant.channel} Adapted Copy
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white capitalize flex items-center gap-1.5">
+                          {currentRepurposeVariant.channel} Adapted Copy
+                        </span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded border font-medium ${
+                            currentRepurposeVariant.provider === "groq"
+                              ? "bg-indigo-950/70 text-indigo-300 border-indigo-700/60"
+                              : "bg-amber-950/40 text-amber-300 border-amber-800/60"
+                          }`}
+                        >
+                          {currentRepurposeVariant.provider === "groq"
+                            ? `Groq (${currentRepurposeVariant.model || "LLM"})`
+                            : "Fallback Template (AI Unavailable)"}
+                        </span>
+                      </div>
                       <span
                         className={`text-xs font-mono font-medium ${
                           currentRepurposeVariant.charCount > currentRepurposeVariant.maxChars

@@ -655,6 +655,7 @@ export function ContentStudio() {
       <AIModal
         initialContent={body}
         onInsert={(text) => setBody((prev) => (prev ? `${prev}\n\n${text}` : text))}
+        onDraftCreated={() => loadDrafts()}
       />
     </div>
   );

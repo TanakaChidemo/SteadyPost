@@ -21,7 +21,7 @@ const PLATFORM_SPECS = {
     name: "Instagram",
     maxChars: 2200,
     maxHashtags: 10,
-    guidelines: "Warm, visual storytelling, emoji hooks, save/share call-to-action, 5-8 curated hashtags at bottom.",
+    guidelines: "Warm, visual storytelling, emoji hooks, save/share call-to-action, 3-5 curated hashtags at bottom.",
   },
   facebook: {
     id: "facebook",
@@ -32,112 +32,73 @@ const PLATFORM_SPECS = {
   },
 };
 
+const STOP_WORDS = new Set([
+  "this", "that", "with", "from", "have", "will", "your", "about", "every",
+  "some", "more", "when", "what", "their", "there", "they", "been", "were",
+  "which", "would", "could", "should", "into", "than", "them", "then", "just",
+  "also", "here", "make", "like", "time", "each", "very", "most", "over",
+  "such", "only", "other",
+]);
+
+function clampText(text, maxChars) {
+  if (!text || text.length <= maxChars) return text || "";
+  const slice = text.slice(0, maxChars - 3);
+  const lastSpace = slice.lastIndexOf(" ");
+  const truncated = lastSpace > 0 && slice.length - lastSpace < 25 ? slice.slice(0, lastSpace) : slice;
+  return `${truncated.trimEnd()}...`;
+}
+
 function extractKeywords(text, count = 5) {
-  if (!text) return ["#SteadyPost", "#Growth", "#Innovation"].slice(0, count);
+  if (!text) return [];
   const clean = text
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, "")
     .split(/\s+/)
-    .filter((w) => w.length > 3 && !["this", "that", "with", "from", "have", "will", "your", "about"].includes(w));
+    .filter((w) => w.length > 3 && !STOP_WORDS.has(w));
 
   const unique = Array.from(new Set(clean));
-  const tags = unique.slice(0, count).map((w) => `#${w.charAt(0).toUpperCase() + w.slice(1)}`);
-  return tags.length > 0 ? tags : ["#SteadyPost", "#Growth"].slice(0, count);
+  return unique.slice(0, count).map((w) => `#${w.charAt(0).toUpperCase() + w.slice(1)}`);
 }
 
-function buildLocalChannelVariant({ channel, idea, tone = "professional", businessProfile = null, sourcePost = null }) {
+function buildLocalChannelVariant({
+  channel,
+  idea,
+  tone = "professional",
+  _businessProfile = null,
+  sourcePost = null,
+}) {
   const spec = PLATFORM_SPECS[channel] || PLATFORM_SPECS.instagram;
-  const rawKeywords = extractKeywords(idea, 8);
-  const brandName = businessProfile?.businessType ? businessProfile.businessType : "SteadyPost";
-  const audience = businessProfile?.audience ? `for ${businessProfile.audience}` : "";
-  const brandContext = brandName ? ` (${brandName})` : "";
-
-  let title = "Omnichannel Campaign";
-  let body = "";
-  let hashtags = [];
-
   const cleanIdea = idea.trim().replace(/\s+/g, " ");
+
+  let title = `${spec.name} Post: ${cleanIdea.slice(0, 30)}...`;
+  let body = "";
+  const hashtags = extractKeywords(cleanIdea, spec.maxHashtags);
 
   if (channel === "twitter") {
     title = `Tweet: ${cleanIdea.slice(0, 30)}...`;
-    hashtags = rawKeywords.slice(0, 2);
-    const tagsString = hashtags.join(" ");
-
-    // Ensure under 280 characters
-    let tweetCore = "";
-    if (tone === "inspirational") {
-      tweetCore = `🚀 ${cleanIdea}\n\nBig takeaway: Relentless consistency separates ideas from execution.`;
-    } else if (tone === "witty" || tone === "playful") {
-      tweetCore = `Hot take: ${cleanIdea}\n\nMost teams overthink it. Keep it simple and ship.`;
-    } else if (tone === "authoritative" || tone === "professional") {
-      tweetCore = `💡 ${cleanIdea}\n\nKey lesson: Scalable distribution beats sporadic hustle every time.`;
-    } else {
-      tweetCore = `${cleanIdea}\n\nWhat is your perspective on this?`;
-    }
-
-    const availableChars = spec.maxChars - (tagsString.length + 3);
-    if (tweetCore.length > availableChars) {
-      tweetCore = tweetCore.slice(0, availableChars - 3) + "...";
-    }
-    body = `${tweetCore}\n\n${tagsString}`.trim();
+    const prefix = tone === "professional" || tone === "authoritative" ? "💡 " : "✨ ";
+    body = clampText(`${prefix}${cleanIdea}`, spec.maxChars);
   } else if (channel === "linkedin") {
     title = `LinkedIn Insight: ${cleanIdea.slice(0, 35)}...`;
-    hashtags = Array.from(new Set([...rawKeywords.slice(0, 3), "#Leadership", "#Strategy"])).slice(0, 4);
-
-    const hook = tone === "inspirational"
-      ? `Transforming ideas into real momentum isn't easy, but here is what we've discovered:`
-      : `A critical observation on modern execution in 2026:`;
-
-    const point1 = `1. The core challenge: Overcoming friction when executing around "${cleanIdea.slice(0, 60)}".`;
-    const point2 = `2. The tactical shift: Aligning workflows ${audience} to prioritize compounding value over short-term noise.`;
-    const point3 = `3. The result: Sustainable growth with clear, measurable outcomes.`;
-
-    const question = `How is your organization approaching this challenge this quarter? Join the discussion below.`;
-
-    body = [
-      hook,
-      "",
-      `Insight: ${cleanIdea}`,
-      "",
-      point1,
-      point2,
-      point3,
-      "",
-      question,
-      "",
-      hashtags.join(" "),
-    ].join("\n");
+    const callout =
+      tone === "casual" || tone === "playful"
+        ? "What has your experience been with this? Let's connect below."
+        : "What has your perspective or strategy been on this? Looking forward to hearing your insights in the comments.";
+    body = clampText(`${cleanIdea}\n\n${callout}`, spec.maxChars);
   } else if (channel === "instagram") {
     title = `Instagram Post: ${cleanIdea.slice(0, 35)}...`;
-    hashtags = Array.from(new Set([...rawKeywords.slice(0, 5), "#ContentStrategy", "#CreatorEconomy", "#GrowthMindset"])).slice(0, 7);
-
-    body = [
-      `✨ ${cleanIdea}`,
-      "",
-      `When you build intentionally ${audience}, every small improvement compounds into major milestones. Here is our reminder to stay focused on high-leverage outcomes. 💫`,
-      "",
-      `📌 Save this post for your next strategy session!`,
-      `👇 Share your thoughts in the comments!`,
-      "",
-      hashtags.join(" "),
-    ].join("\n");
+    body = clampText(
+      `${cleanIdea}\n\nSave this for later and share your thoughts below! 📌`,
+      spec.maxChars
+    );
   } else if (channel === "facebook") {
     title = `Facebook Update: ${cleanIdea.slice(0, 35)}...`;
-    hashtags = rawKeywords.slice(0, 3);
-
-    body = [
-      `Excited to dive into this topic today${brandContext}! 🌟`,
-      "",
-      cleanIdea,
-      "",
-      `We'd love to hear from our community: What has been your biggest win or obstacle with this lately? Drop a comment below and let's exchange notes! 👇`,
-      "",
-      hashtags.join(" "),
-    ].join("\n");
+    body = clampText(
+      `${cleanIdea}\n\nWhat are your thoughts on this? Join the conversation below! 👇`,
+      spec.maxChars
+    );
   } else {
-    title = `Post: ${cleanIdea.slice(0, 35)}...`;
-    hashtags = rawKeywords.slice(0, 3);
-    body = `${cleanIdea}\n\n${hashtags.join(" ")}`;
+    body = clampText(cleanIdea, spec.maxChars);
   }
 
   return {
@@ -151,8 +112,8 @@ function buildLocalChannelVariant({ channel, idea, tone = "professional", busine
     tone,
     charCount: body.length,
     maxChars: spec.maxChars,
-    provider: "local",
-    model: "steadypost-adaptation-engine-v2",
+    provider: "template",
+    model: "template-fallback",
   };
 }
 
@@ -161,8 +122,9 @@ async function forwardToAiService(path, body) {
     return null;
   }
   try {
+    const timeoutMs = parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 12000;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const response = await fetch(`${AI_SERVICE_URL}${path}`, {
       method: "POST",
@@ -176,39 +138,51 @@ async function forwardToAiService(path, body) {
       return await response.json();
     }
   } catch (err) {
-    logger.warn({ err: err.message, path }, "AI service unavailable, using local adaptation engine");
+    logger.warn({ err: err.message, path }, "AI service unavailable, using local template adaptation");
   }
   return null;
 }
 
 async function adaptIdeaToChannels({
   idea,
-  channels = ["twitter", "linkedin", "instagram", "facebook"],
+  channels = ["instagram", "facebook"],
   tone = "professional",
   businessProfile = null,
   sourcePost = null,
 }) {
-  const targetChannels = Array.isArray(channels) && channels.length > 0
-    ? channels
-    : ["twitter", "linkedin", "instagram", "facebook"];
+  const allowed = ["twitter", "linkedin", "instagram", "facebook"];
+  let targetChannels =
+    Array.isArray(channels) && channels.length > 0
+      ? [...new Set(channels.map((c) => String(c).toLowerCase().trim()))].filter((c) =>
+          allowed.includes(c)
+        )
+      : ["instagram", "facebook"];
+
+  if (targetChannels.length === 0) {
+    targetChannels = ["instagram", "facebook"];
+  }
 
   // 1. Try remote AI service (Groq / OpenRouter / Gemini / OpenAI)
   const aiPayload = {
     idea,
     channels: targetChannels,
     tone,
-    businessProfile: businessProfile ? {
-      businessType: businessProfile.businessType,
-      offer: businessProfile.offer,
-      audience: businessProfile.audience,
-      tone: businessProfile.tone,
-    } : null,
-    sourcePost: sourcePost ? {
-      id: sourcePost.id || sourcePost._id,
-      channel: sourcePost.channel,
-      body: sourcePost.content?.body || "",
-      title: sourcePost.content?.title || "",
-    } : null,
+    businessProfile: businessProfile
+      ? {
+          businessType: businessProfile.businessType,
+          offer: businessProfile.offer,
+          audience: businessProfile.audience,
+          tone: businessProfile.tone,
+        }
+      : null,
+    sourcePost: sourcePost
+      ? {
+          id: sourcePost.id || sourcePost._id,
+          channel: sourcePost.channel,
+          body: sourcePost.content?.body || "",
+          title: sourcePost.content?.title || "",
+        }
+      : null,
   };
 
   const aiResult = await forwardToAiService("/generate/variants", aiPayload);
@@ -220,25 +194,26 @@ async function adaptIdeaToChannels({
       sourcePostId: sourcePost?.id || sourcePost?._id || null,
       variants: aiResult.variants.map((v) => {
         const spec = PLATFORM_SPECS[v.channel] || PLATFORM_SPECS.instagram;
+        const clampedBody = clampText(v.content?.body || "", spec.maxChars);
         return {
           channel: v.channel,
           content: {
-            title: v.content?.title || `Adapted for ${spec.name}`,
-            body: v.content?.body || "",
+            title: v.content?.title || `${spec.name} Post: ${idea.slice(0, 30)}...`,
+            body: clampedBody,
             mediaUrls: sourcePost?.content?.mediaUrls || v.content?.mediaUrls || [],
-            hashtags: v.content?.hashtags || extractKeywords(v.content?.body || idea, spec.maxHashtags),
+            hashtags: v.content?.hashtags || extractKeywords(clampedBody, spec.maxHashtags),
           },
           tone,
-          charCount: (v.content?.body || "").length,
+          charCount: clampedBody.length,
           maxChars: spec.maxChars,
-          provider: aiResult.provider || v.provider || "remote-llm",
-          model: aiResult.model || v.model || "multi-model-llm",
+          provider: v.provider || aiResult.provider || "template",
+          model: v.model || aiResult.model || "template-fallback",
         };
       }),
     };
   }
 
-  // 2. Fallback to local intelligent adaptation engine
+  // 2. Fallback to local template adaptation
   const variants = targetChannels.map((channel) =>
     buildLocalChannelVariant({
       channel,
@@ -260,6 +235,7 @@ async function adaptIdeaToChannels({
 module.exports = {
   PLATFORM_SPECS,
   extractKeywords,
+  clampText,
   buildLocalChannelVariant,
   adaptIdeaToChannels,
 };

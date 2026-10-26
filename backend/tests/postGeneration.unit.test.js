@@ -6,7 +6,7 @@ describe("Post Generation & Adaptation Unit Tests (#05)", () => {
     const result = await contentAdaptationService.adaptIdeaToChannels({
       idea,
       channels: ["twitter", "linkedin", "instagram", "facebook"],
-      tone: "authoritative",
+      tone: "professional",
       businessProfile: {
         businessType: "Software",
         audience: "Marketers",
@@ -20,26 +20,39 @@ describe("Post Generation & Adaptation Unit Tests (#05)", () => {
     expect(twitter.content.body).toContain("SteadyPost simplifies");
 
     const linkedin = result.variants.find((v) => v.channel === "linkedin");
-    expect(linkedin.content.body).toContain("Marketers");
-    expect(linkedin.content.hashtags).toContain("#Leadership");
+    expect(linkedin.content.body).toContain("SteadyPost simplifies");
+    expect(linkedin.provider).toBe("template");
 
     const instagram = result.variants.find((v) => v.channel === "instagram");
-    expect(instagram.content.body).toContain("✨");
+    expect(instagram.content.body).toContain("SteadyPost simplifies");
 
     const facebook = result.variants.find((v) => v.channel === "facebook");
-    expect(facebook.content.body).toContain("Software");
+    expect(facebook.content.body).toContain("SteadyPost simplifies");
   });
 
-  it("handles empty / custom channel gracefully", async () => {
+  it("filters out invalid channels and removes duplicates", async () => {
     const result = await contentAdaptationService.adaptIdeaToChannels({
       idea: "Test idea",
-      channels: ["custom_channel"],
+      channels: ["tiktok", "myspace", "facebook", "facebook", "instagram"],
       tone: "casual",
     });
 
-    expect(result.variants.length).toBe(1);
-    expect(result.variants[0].channel).toBe("custom_channel");
-    expect(result.variants[0].content.body).toContain("Test idea");
+    // Only allowed channels are retained and deduplicated
+    expect(result.variants.length).toBe(2);
+    const channels = result.variants.map((v) => v.channel);
+    expect(channels).toEqual(["facebook", "instagram"]);
+  });
+
+  it("defaults to instagram and facebook when no valid channels are given", async () => {
+    const result = await contentAdaptationService.adaptIdeaToChannels({
+      idea: "Test idea",
+      channels: ["unknown_channel"],
+      tone: "casual",
+    });
+
+    expect(result.variants.length).toBe(2);
+    const channels = result.variants.map((v) => v.channel);
+    expect(channels).toEqual(["instagram", "facebook"]);
   });
 
   it("preserves media URLs and links when repurposing a post", async () => {

@@ -1,11 +1,15 @@
 const { z } = require("zod");
 const postModel = require("../models/post.model");
+const contentDraftModel = require("../models/contentDraft.model");
 const approvalEventModel = require("../models/approvalEvent.model");
 const predictionRecordModel = require("../models/predictionRecord.model");
 const postMetricsModel = require("../models/postMetrics.model");
 const businessProfileModel = require("../models/businessProfile.model");
 const contentAdaptationService = require("../services/contentAdaptation.service");
 const { enqueuePublishJob } = require("../queue");
+
+const ALLOWED_CHANNELS = ["twitter", "linkedin", "instagram", "facebook"];
+const MAX_IDEA_LENGTH = 5000;
 
 const createPostSchema = z.object({
   title: z.string().optional(),
@@ -223,7 +227,11 @@ async function getTopPerforming(req, res) {
 }
 
 const generateVariantsSchema = z.object({
-  idea: z.string().min(1, "Idea or topic is required"),
+  idea: z
+    .string()
+    .trim()
+    .min(1, "Idea or topic is required")
+    .max(MAX_IDEA_LENGTH, `Idea cannot exceed ${MAX_IDEA_LENGTH} characters`),
   channels: z.array(z.string()).optional(),
   tone: z.string().optional(),
   campaignId: z.string().optional().nullable(),
@@ -238,6 +246,15 @@ async function generateVariants(req, res) {
   }
 
   const { idea, channels, tone, campaignId = null, sourcePostId = null, saveAsDrafts = false } = parsed.data;
+
+  const rawChannels = channels;
+  let targetChannels =
+    Array.isArray(rawChannels) && rawChannels.length > 0
+      ? [...new Set(rawChannels.map((c) => String(c).toLowerCase().trim()))].filter((c) =>
+          ALLOWED_CHANNELS.includes(c)
+        )
+      : ["instagram", "facebook"];
+  if (targetChannels.length === 0) targetChannels = ["instagram", "facebook"];
 
   let effectiveTone = tone;
   let businessProfile = null;
@@ -259,7 +276,7 @@ async function generateVariants(req, res) {
 
   const adaptationResult = await contentAdaptationService.adaptIdeaToChannels({
     idea,
-    channels,
+    channels: targetChannels,
     tone: effectiveTone,
     businessProfile,
     sourcePost,
@@ -299,6 +316,34 @@ async function generateVariants(req, res) {
       });
       createdDrafts.push(post);
       variant.post = post;
+
+      try {
+        await contentDraftModel.create({
+          ownerId: req.user.id,
+          title: variant.content.title,
+          body: variant.content.body,
+          platforms: [variant.channel],
+          mediaUrls: variant.content.mediaUrls || [],
+          status: "draft",
+          aiMetadata: {
+            provider: variant.provider,
+            model: variant.model,
+            tone: effectiveTone,
+            idea,
+            sourcePostId,
+            postId: post.id,
+          },
+          versions: [
+            {
+              body: variant.content.body,
+              editedAt: new Date(),
+              editedBy: req.user.id,
+            },
+          ],
+        });
+      } catch (err) {
+        // non-blocking
+      }
     }
     adaptationResult.savedDrafts = createdDrafts;
   }
@@ -307,7 +352,9 @@ async function generateVariants(req, res) {
 }
 
 const repurposePostSchema = z.object({
-  targetChannels: z.array(z.string()).min(1, "At least one target channel is required"),
+  targetChannels: z
+    .array(z.enum(["twitter", "linkedin", "instagram", "facebook"]))
+    .min(1, "At least one target channel is required"),
   tone: z.string().optional(),
   saveAsDrafts: z.boolean().optional(),
 });
@@ -323,7 +370,8 @@ async function repurposePost(req, res) {
     return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
   }
 
-  const { targetChannels, tone, saveAsDrafts = false } = parsed.data;
+  const { tone, saveAsDrafts = false } = parsed.data;
+  const targetChannels = [...new Set(parsed.data.targetChannels)];
 
   let effectiveTone = tone;
   let businessProfile = null;
@@ -379,6 +427,34 @@ async function repurposePost(req, res) {
       });
       createdDrafts.push(newPost);
       variant.post = newPost;
+
+      try {
+        await contentDraftModel.create({
+          ownerId: req.user.id,
+          title: variant.content.title,
+          body: variant.content.body,
+          platforms: [variant.channel],
+          mediaUrls: post.content?.mediaUrls || [],
+          status: "draft",
+          aiMetadata: {
+            provider: variant.provider,
+            model: variant.model,
+            tone: effectiveTone,
+            sourcePostId: post.id,
+            postId: newPost.id,
+            repurposed: true,
+          },
+          versions: [
+            {
+              body: variant.content.body,
+              editedAt: new Date(),
+              editedBy: req.user.id,
+            },
+          ],
+        });
+      } catch (err) {
+        // non-blocking
+      }
     }
     adaptationResult.savedDrafts = createdDrafts;
   }
@@ -398,16 +474,20 @@ const batchCreateSchema = z.object({
   posts: z
     .array(
       z.object({
-        title: z.string().optional(),
-        body: z.string().min(1, "Post body is required"),
-        channel: z.string().min(1, "Channel is required"),
+        title: z.string().max(200).optional(),
+        body: z
+          .string()
+          .min(1, "Post body is required")
+          .max(MAX_IDEA_LENGTH, `Post body cannot exceed ${MAX_IDEA_LENGTH} characters`),
+        channel: z.enum(["twitter", "linkedin", "instagram", "facebook"]),
         campaignId: z.string().optional().nullable(),
         mediaUrls: z.array(z.string()).optional(),
         hashtags: z.array(z.string()).optional(),
         aiMetadata: z.record(z.any()).optional(),
       })
     )
-    .min(1, "At least one post is required"),
+    .min(1, "At least one post is required")
+    .max(20, "Cannot batch create more than 20 posts at once"),
 });
 
 async function batchCreate(req, res) {
@@ -440,6 +520,30 @@ async function batchCreate(req, res) {
   }));
 
   const createdPosts = await postModel.createMany(itemsToInsert);
+
+  for (const item of itemsToInsert) {
+    try {
+      await contentDraftModel.create({
+        ownerId: req.user.id,
+        title: item.content.title || `Post for ${item.channel}`,
+        body: item.content.body,
+        platforms: [item.channel],
+        mediaUrls: item.content.mediaUrls || [],
+        status: "draft",
+        aiMetadata: item.aiMetadata || {},
+        versions: [
+          {
+            body: item.content.body,
+            editedAt: new Date(),
+            editedBy: req.user.id,
+          },
+        ],
+      });
+    } catch (err) {
+      // non-blocking
+    }
+  }
+
   return res.status(201).json({ items: createdPosts });
 }
 

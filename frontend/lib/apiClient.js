@@ -204,6 +204,6 @@ export const api = {
     generateCaption: (data) => apiClient.post("/ai/generate-caption", data).then((r) => r.data),
     suggestHashtags: (data) => apiClient.post("/ai/suggest-hashtags", data).then((r) => r.data),
     repurpose: (data) => apiClient.post("/ai/repurpose", data).then((r) => r.data),
-    generateVariants: (data) => apiClient.post("/ai/generate-variants", data).then((r) => r.data),
+    generateVariants: (data) => apiClient.post("/posts/generate-variants", data).then((r) => r.data),
   },
 };

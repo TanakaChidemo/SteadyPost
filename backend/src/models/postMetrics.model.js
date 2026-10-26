@@ -37,7 +37,7 @@ async function getTopPerformingForWorkspace(workspaceId, { limit = 10, channel, 
     return { items: [], hasMetrics: false, total: 0, metricUsed: metric };
   }
 
-  const query = { workspaceId };
+  const query = { workspaceId, status: "published" };
   if (channel) query.channel = channel;
 
   const posts = await Post.find(query).sort({ updatedAt: -1 }).limit(100).lean();

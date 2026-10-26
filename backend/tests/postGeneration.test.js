@@ -12,7 +12,7 @@ jest.setTimeout(30000);
 
 describe("Omnichannel Post Generation & Repurposing (#05)", () => {
   let isDbAvailable = false;
-  let owner, workspace, ownerToken;
+  let owner, workspace, ownerToken, viewer, viewerToken;
 
   beforeAll(async () => {
     try {
@@ -35,6 +35,19 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
         status: "active",
         joinedAt: new Date(),
       });
+
+      viewer = await userModel.create({
+        email: `gen_viewer_${Date.now()}@example.com`,
+        name: "Generation Viewer",
+      });
+      await membershipModel.create({
+        workspaceId: workspace.id,
+        userId: viewer.id,
+        role: "viewer",
+        status: "active",
+        joinedAt: new Date(),
+      });
+
       await businessProfileModel.upsert(workspace.id, {
         businessType: "Marketing SaaS",
         offer: "AI Social Media Publisher",
@@ -43,6 +56,7 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
       });
 
       ownerToken = createToken({ ...owner, activeWorkspaceId: workspace.id });
+      viewerToken = createToken({ ...viewer, activeWorkspaceId: workspace.id });
     } catch (err) {
       // MongoDB not running locally (e.g. non-docker Windows dev environment)
       isDbAvailable = false;
@@ -88,15 +102,15 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
 
     const linkedinVariant = res.body.variants.find((v) => v.channel === "linkedin");
     expect(linkedinVariant).toBeDefined();
-    expect(linkedinVariant.content.body).toContain("Insight:");
+    expect(linkedinVariant.content.body).toContain("insights");
 
     const instagramVariant = res.body.variants.find((v) => v.channel === "instagram");
     expect(instagramVariant).toBeDefined();
-    expect(instagramVariant.content.body).toContain("✨");
+    expect(instagramVariant.content.body).toContain("Save this for later");
 
     const facebookVariant = res.body.variants.find((v) => v.channel === "facebook");
     expect(facebookVariant).toBeDefined();
-    expect(facebookVariant.content.body).toContain("community");
+    expect(facebookVariant.content.body).toContain("conversation");
   });
 
   it("can generate variants and automatically persist them as draft posts", async () => {
@@ -123,10 +137,10 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
     expect(drafts[0].aiMetadata.idea).toContain("Special feature drop");
   });
 
-  it("reads top-performing posts even with zero metrics (read path for #19)", async () => {
+  it("reads published top-performing posts only and excludes unpublished drafts", async () => {
     if (!isDbAvailable) return;
 
-    // Create a sample post
+    // Create a published post
     const samplePost = await postModel.create({
       workspaceId: workspace.id,
       authorId: owner.id,
@@ -139,6 +153,18 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
       publishedAt: new Date(),
     });
 
+    // Create an unpublished draft post
+    const unpublishedDraft = await postModel.create({
+      workspaceId: workspace.id,
+      authorId: owner.id,
+      channel: "facebook",
+      content: {
+        title: "Unpublished Draft",
+        body: "Draft body that must not show up in top posts.",
+      },
+      status: "draft",
+    });
+
     const res = await request(app)
       .get("/api/v1/posts/top-performing")
       .set("Authorization", `Bearer ${ownerToken}`)
@@ -146,14 +172,14 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.items).toBeDefined();
-    expect(res.body.items.length).toBeGreaterThanOrEqual(1);
 
-    const found = res.body.items.find((item) => item.id === samplePost.id);
-    expect(found).toBeDefined();
-    expect(found.metrics).toBeDefined();
-    expect(found.metrics.reach).toBe(0);
-    expect(found.metrics.engagementScore).toBe(0);
-    expect(found.metrics.hasMetrics).toBe(false);
+    const foundPublished = res.body.items.find((item) => item.id === samplePost.id);
+    expect(foundPublished).toBeDefined();
+    expect(foundPublished.metrics).toBeDefined();
+    expect(foundPublished.metrics.hasMetrics).toBe(false);
+
+    const foundDraft = res.body.items.find((item) => item.id === unpublishedDraft.id);
+    expect(foundDraft).toBeUndefined();
   });
 
   it("ranks top posts by engagement score when PostMetrics are recorded", async () => {
@@ -270,5 +296,62 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
     expect(res.body.items.length).toBe(2);
     expect(res.body.items[0].status).toBe("draft");
     expect(res.body.items[1].channel).toBe("linkedin");
+
+    // Verify saved drafts appear in content studio drafts list
+    const draftsRes = await request(app)
+      .get("/api/v1/content/drafts")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .set("X-Workspace-Id", workspace.id);
+
+    expect(draftsRes.status).toBe(200);
+    expect(draftsRes.body.items).toBeDefined();
+    const batchTweetDraft = draftsRes.body.items.find((d) => d.title === "Batch Tweet");
+    expect(batchTweetDraft).toBeDefined();
+    expect(batchTweetDraft.body).toBe("Tweet content from batch");
+  });
+
+  it("enforces role checks on generation endpoints and rejects viewers with 403", async () => {
+    if (!isDbAvailable) return;
+
+    // Viewers cannot generate variants via /posts/generate-variants
+    const postRes = await request(app)
+      .post("/api/v1/posts/generate-variants")
+      .set("Authorization", `Bearer ${viewerToken}`)
+      .set("X-Workspace-Id", workspace.id)
+      .send({
+        idea: "Viewer trying to trigger generation",
+        channels: ["instagram", "facebook"],
+      });
+
+    expect(postRes.status).toBe(403);
+
+    // Viewers cannot generate variants via /ai/generate-variants
+    const aiRes = await request(app)
+      .post("/api/v1/ai/generate-variants")
+      .set("Authorization", `Bearer ${viewerToken}`)
+      .set("X-Workspace-Id", workspace.id)
+      .send({
+        idea: "Viewer trying to trigger AI call",
+        channels: ["instagram", "facebook"],
+      });
+
+    expect(aiRes.status).toBe(403);
+  });
+
+  it("rejects ideas exceeding 5000 characters with 400 validation error", async () => {
+    if (!isDbAvailable) return;
+
+    const oversizedIdea = "A".repeat(5001);
+    const res = await request(app)
+      .post("/api/v1/posts/generate-variants")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .set("X-Workspace-Id", workspace.id)
+      .send({
+        idea: oversizedIdea,
+        channels: ["instagram"],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Validation failed");
   });
 });

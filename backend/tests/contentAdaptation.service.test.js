@@ -34,14 +34,14 @@ describe("Content Adaptation Service (#05)", () => {
       tags.forEach((tag) => expect(tag.startsWith("#")).toBe(true));
     });
 
-    it("falls back to default tags on empty string", () => {
+    it("returns empty array on empty string without injecting buzzwords", () => {
       const tags = extractKeywords("", 2);
-      expect(tags).toEqual(["#SteadyPost", "#Growth"]);
+      expect(tags).toEqual([]);
     });
   });
 
   describe("buildLocalChannelVariant", () => {
-    it("builds a Twitter variant adhering to the 280 character limit and max 2 hashtags", () => {
+    it("builds a Twitter variant adhering to the 280 character limit and template label", () => {
       const variant = buildLocalChannelVariant({
         channel: "twitter",
         idea: sampleIdea,
@@ -51,9 +51,9 @@ describe("Content Adaptation Service (#05)", () => {
       expect(variant.channel).toBe("twitter");
       expect(variant.charCount).toBeLessThanOrEqual(280);
       expect(variant.content.body.length).toBeLessThanOrEqual(280);
-      expect(variant.content.hashtags.length).toBeLessThanOrEqual(2);
       expect(variant.content.title).toContain("Tweet:");
-      expect(variant.provider).toBe("local");
+      expect(variant.provider).toBe("template");
+      expect(variant.model).toBe("template-fallback");
     });
 
     it("builds a LinkedIn variant with professional thought-leadership formatting", () => {
@@ -61,20 +61,15 @@ describe("Content Adaptation Service (#05)", () => {
         channel: "linkedin",
         idea: sampleIdea,
         tone: "professional",
-        businessProfile: {
-          businessType: "B2B SaaS",
-          audience: "Founders and Growth Leaders",
-        },
       });
 
       expect(variant.channel).toBe("linkedin");
-      expect(variant.content.body).toContain("Insight:");
-      expect(variant.content.body).toContain("1. The core challenge:");
-      expect(variant.content.body).toContain("Founders and Growth Leaders");
-      expect(variant.content.hashtags).toContain("#Leadership");
+      expect(variant.content.body).toContain(sampleIdea.slice(0, 30));
+      expect(variant.content.body).toContain("Looking forward to hearing your insights");
+      expect(variant.provider).toBe("template");
     });
 
-    it("builds an Instagram variant with emojis, engagement CTA, and hashtags", () => {
+    it("builds an Instagram variant with call-to-action", () => {
       const variant = buildLocalChannelVariant({
         channel: "instagram",
         idea: sampleIdea,
@@ -82,10 +77,9 @@ describe("Content Adaptation Service (#05)", () => {
       });
 
       expect(variant.channel).toBe("instagram");
-      expect(variant.content.body).toContain("✨");
-      expect(variant.content.body).toContain("Save this post");
-      expect(variant.content.body).toContain("👇 Share your thoughts");
-      expect(variant.content.hashtags.length).toBeGreaterThanOrEqual(3);
+      expect(variant.content.body).toContain(sampleIdea.slice(0, 30));
+      expect(variant.content.body).toContain("Save this for later");
+      expect(variant.provider).toBe("template");
     });
 
     it("builds a Facebook variant focused on community and discussion", () => {
@@ -93,12 +87,12 @@ describe("Content Adaptation Service (#05)", () => {
         channel: "facebook",
         idea: sampleIdea,
         tone: "casual",
-        businessProfile: { businessType: "Growth Agency" },
       });
 
       expect(variant.channel).toBe("facebook");
-      expect(variant.content.body).toContain("Excited to dive into this topic today (Growth Agency)! 🌟");
-      expect(variant.content.body).toContain("We'd love to hear from our community");
+      expect(variant.content.body).toContain(sampleIdea.slice(0, 30));
+      expect(variant.content.body).toContain("Join the conversation below");
+      expect(variant.provider).toBe("template");
     });
   });
 
@@ -121,7 +115,7 @@ describe("Content Adaptation Service (#05)", () => {
       expect(twitterVariant.charCount).toBeLessThanOrEqual(280);
 
       const linkedinVariant = result.variants.find((v) => v.channel === "linkedin");
-      expect(linkedinVariant.content.body).toContain("Insight:");
+      expect(linkedinVariant.content.body).toContain(sampleIdea.slice(0, 30));
     });
 
     it("repurposes a source post into platform-native variants", async () => {

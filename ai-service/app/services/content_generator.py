@@ -361,15 +361,128 @@ def repurpose_content(content: str, source_platform: str, target_platforms: list
     return {"sourcePlatform": source_platform, "repurposed": results, "model": "local-ai-engine"}
 
 
+PLATFORM_LIMITS = {
+    "twitter": 280,
+    "instagram": 2200,
+    "linkedin": 3000,
+    "facebook": 5000,
+}
+
+
+def _clamp_to_platform_limit(text: str, channel: str) -> str:
+    limit = PLATFORM_LIMITS.get(channel, 5000)
+    if len(text) <= limit:
+        return text
+    truncated = text[: limit - 3]
+    last_space = truncated.rfind(" ")
+    if last_space > 0 and (len(truncated) - last_space) < 25:
+        truncated = truncated[:last_space]
+    return truncated.rstrip() + "..."
+
+
+def _build_fallback_variant(ch: str, idea: str, tone: str) -> str:
+    cleaned = idea.strip()
+    if ch == "twitter":
+        prefix = "💡 " if tone == "professional" else "✨ "
+        body = f"{prefix}{cleaned}"
+        return _clamp_to_platform_limit(body, "twitter")
+    elif ch == "linkedin":
+        if tone in ("casual", "playful"):
+            callout = "What has your experience been with this? Let's connect below."
+        else:
+            callout = "What has your perspective or strategy been on this? Let's discuss."
+        return f"{cleaned}\n\n{callout}"
+    elif ch == "instagram":
+        return f"{cleaned}\n\nSave this for later and share your thoughts below! 📌"
+    elif ch == "facebook":
+        return f"{cleaned}\n\nWhat are your thoughts on this? Join the conversation below! 👇"
+    return cleaned
+
+
+def _generate_single_channel_variant(
+    ch: str,
+    idea: str,
+    tone: str,
+    profile_context: str,
+    source_post: dict | None,
+    client,
+    model_name: str,
+) -> dict:
+    constraint = PLATFORM_CONSTRAINTS.get(ch, "concise and platform-native")
+    title = f"{ch.capitalize()} Post: {idea[:30]}"
+    body = None
+    is_ai = False
+
+    if client:
+        try:
+            system_prompt = (
+                f"You are an expert social media copywriter. Write a platform-native post "
+                f"for {ch} based on the given idea. Requirements: {constraint}. "
+                f"Tone: {tone}.{profile_context} Return ONLY the post body text without "
+                f"any meta commentary or markdown quotes."
+            )
+            user_prompt = f"Idea to adapt:\n{idea}"
+            if source_post and source_post.get("body"):
+                user_prompt += f"\n\nSource post reference:\n{source_post['body']}"
+
+            res = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.7,
+            )
+            raw_body = res.choices[0].message.content.strip()
+            if raw_body:
+                body = _clamp_to_platform_limit(raw_body, ch)
+                is_ai = True
+        except Exception:
+            body = None
+            is_ai = False
+
+    if not body:
+        body = _build_fallback_variant(ch, idea, tone)
+        is_ai = False
+
+    tags = re.findall(r"#\w+", body)
+    return {
+        "channel": ch,
+        "content": {
+            "title": title,
+            "body": body,
+            "hashtags": tags if tags else [],
+            "mediaUrls": [],
+        },
+        "tone": tone,
+        "provider": "groq" if is_ai else "template",
+        "model": model_name if is_ai else "template-fallback",
+    }
+
+
 def generate_variants(
     idea: str,
-    channels: list,
+    channels: list | None = None,
     tone: str = "casual",
     business_profile: dict | None = None,
     source_post: dict | None = None,
 ) -> dict:
+    allowed = ["twitter", "linkedin", "instagram", "facebook"]
+    if not channels:
+        channels = ["instagram", "facebook"]
+    else:
+        seen = set()
+        clean_channels = []
+        for ch in channels:
+            if isinstance(ch, str):
+                c = ch.lower().strip()
+                if c in allowed and c not in seen:
+                    seen.add(c)
+                    clean_channels.append(c)
+        channels = clean_channels if clean_channels else ["instagram", "facebook"]
+
+    idea = idea.strip()[:5000]
     client, model_name = _get_active_model_and_client()
-    variants = []
 
     profile_context = ""
     if business_profile:
@@ -380,80 +493,49 @@ def generate_variants(
             f" Context: Business={b_type}, Audience={b_aud}, Offer={b_off}."
         )
 
-    for ch in channels:
-        constraint = PLATFORM_CONSTRAINTS.get(ch, "general social media best practices")
-        title = f"{ch.capitalize()} Post: {idea[:30]}"
-        body = None
-
-        if client:
+    variants_by_channel = {}
+    with ThreadPoolExecutor(max_workers=min(len(channels), 4)) as executor:
+        futures = {
+            executor.submit(
+                _generate_single_channel_variant,
+                ch,
+                idea,
+                tone,
+                profile_context,
+                source_post,
+                client,
+                model_name,
+            ): ch
+            for ch in channels
+        }
+        for future in as_completed(futures):
+            ch = futures[future]
             try:
-                system_prompt = (
-                    f"You are an expert social media copywriter. Write a platform-native post "
-                    f"for {ch} based on the given idea or past post. Constraints: {constraint}. "
-                    f"Tone: {tone}.{profile_context} Return only the post body text."
-                )
-                user_prompt = f"Core idea / content to adapt:\n{idea}"
-                if source_post and source_post.get("body"):
-                    user_prompt += f"\n\nSource post to repurpose:\n{source_post['body']}"
-
-                res = client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=0.75,
-                )
-                body = res.choices[0].message.content.strip()
+                res = future.result()
+                variants_by_channel[ch] = res
             except Exception:
-                body = None
+                fallback_body = _build_fallback_variant(ch, idea, tone)
+                variants_by_channel[ch] = {
+                    "channel": ch,
+                    "content": {
+                        "title": f"{ch.capitalize()} Post: {idea[:30]}",
+                        "body": fallback_body,
+                        "hashtags": re.findall(r"#\w+", fallback_body),
+                        "mediaUrls": [],
+                    },
+                    "tone": tone,
+                    "provider": "template",
+                    "model": "template-fallback",
+                }
 
-        if not body:
-            if ch == "twitter":
-                trimmed = idea[:240] + ("..." if len(idea) > 240 else "")
-                body = f"🚀 {trimmed}\n\n#Growth #Innovation"
-            elif ch == "linkedin":
-                body = (
-                    f"A key strategic takeaway on:\n\n{idea}\n\n"
-                    "1. Focus on core leverage points\n2. Iterate rapidly\n"
-                    "3. Scale distribution sustainably\n\n"
-                    "What is your team's approach? Let's connect below.\n\n"
-                    "#Leadership #Strategy #B2B"
-                )
-            elif ch == "instagram":
-                body = (
-                    f"✨ {idea}\n\n"
-                    "Success comes from compounding small improvements every day. "
-                    "Save this post for your next strategy session! 📌\n\n"
-                    "#CreatorLife #ContentStrategy #GrowthMindset"
-                )
-            elif ch == "facebook":
-                body = (
-                    f"Excited to explore this with you today! 🌟\n\n{idea}\n\n"
-                    "What has your experience been with this? Share in the comments! 👇\n\n"
-                    "#Community #Growth"
-                )
-            else:
-                body = idea
-
-        tags = re.findall(r"#\w+", body)
-        variants.append({
-            "channel": ch,
-            "content": {
-                "title": title,
-                "body": body,
-                "hashtags": tags if tags else ["#Growth", "#Strategy"],
-                "mediaUrls": [],
-            },
-            "tone": tone,
-            "provider": "groq" if client else "local",
-            "model": model_name if client else "local-ai-engine",
-        })
-
+    ordered_variants = [
+        variants_by_channel[ch] for ch in channels if ch in variants_by_channel
+    ]
+    any_ai = any(v.get("provider") == "groq" for v in ordered_variants)
     return {
         "idea": idea,
         "tone": tone,
-        "variants": variants,
-        "provider": "groq" if client else "local",
-        "model": model_name if client else "local-ai-engine",
+        "variants": ordered_variants,
+        "provider": "groq" if any_ai else "template",
+        "model": model_name if any_ai else "template-fallback",
     }

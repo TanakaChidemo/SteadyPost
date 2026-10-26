@@ -6,45 +6,33 @@ let mongod = null;
 async function connectDB() {
   let uri = process.env.MONGODB_URI;
 
-  if (!uri || uri === "memory" || uri.startsWith("mongodb+srv://<user>")) {
+  if (uri === "memory") {
     try {
       const { MongoMemoryServer } = require("mongodb-memory-server");
-      logger.info("Starting in-memory MongoDB server...");
+      logger.info("Starting in-memory MongoDB server (opt-in MONGODB_URI=memory)...");
       mongod = await MongoMemoryServer.create();
       uri = mongod.getUri();
       logger.info({ uri }, "In-memory MongoDB server started");
     } catch (memErr) {
-      if (!uri) {
-        throw new Error(
-          "MONGODB_URI is not set and in-memory MongoDB failed to start: " + memErr.message
-        );
-      }
+      throw new Error(
+        "MONGODB_URI=memory was specified, but mongodb-memory-server failed to start: " +
+          memErr.message
+      );
     }
+  }
+
+  if (!uri) {
+    throw new Error(
+      "MONGODB_URI environment variable is not defined. Please set MONGODB_URI or use MONGODB_URI=memory for opt-in local testing."
+    );
   }
 
   mongoose.connection.on("error", (err) => {
     logger.error({ err }, "MongoDB connection error");
   });
 
-  try {
-    await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
-    logger.info("Connected to MongoDB");
-  } catch (connectErr) {
-    if (!mongod) {
-      try {
-        const { MongoMemoryServer } = require("mongodb-memory-server");
-        logger.warn("Could not connect to external MONGODB_URI. Starting in-memory MongoDB for local dev...");
-        mongod = await MongoMemoryServer.create();
-        const fallbackUri = mongod.getUri();
-        await mongoose.connect(fallbackUri);
-        logger.info({ fallbackUri }, "Connected to in-memory MongoDB fallback");
-        return;
-      } catch (fallbackErr) {
-        // rethrow original connectErr
-      }
-    }
-    throw connectErr;
-  }
+  await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
+  logger.info("Connected to MongoDB");
 }
 
 async function disconnectDB() {
