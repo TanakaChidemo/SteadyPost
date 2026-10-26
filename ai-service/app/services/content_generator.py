@@ -457,4 +457,3 @@ def generate_variants(
         "provider": "groq" if client else "local",
         "model": model_name if client else "local-ai-engine",
     }
-
