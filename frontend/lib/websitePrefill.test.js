@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyPrefill,
   filledLabels,
+  isWebsiteAsleep,
   nameSuggestion,
   prefillFromWebsite,
   websiteReadError,
@@ -105,10 +106,28 @@ describe("nameSuggestion", () => {
   });
 });
 
+describe("isWebsiteAsleep", () => {
+  it("is true when the server or the browser stopped waiting", () => {
+    assert.equal(isWebsiteAsleep({ response: { data: { code: "TIMEOUT" } } }), true);
+    assert.equal(isWebsiteAsleep(Object.assign(new Error("timeout"), { code: "ECONNABORTED" })), true);
+  });
+
+  it("is false for failures that trying again won't fix", () => {
+    assert.equal(isWebsiteAsleep({ response: { data: { code: "HTTP_ERROR" } } }), false);
+    assert.equal(isWebsiteAsleep({ response: { data: { code: "INVALID_URL" } } }), false);
+    assert.equal(isWebsiteAsleep(new Error("Network Error")), false);
+  });
+});
+
 describe("websiteReadError", () => {
   it("explains each failure in plain words", () => {
     assert.equal(websiteReadError({ response: { data: { code: "TIMEOUT" } } }), "it took too long to respond");
     assert.equal(websiteReadError({ response: { data: { code: "NETWORK" } } }), "we couldn't reach it");
+  });
+
+  it("says the site was too slow when the browser stops waiting", () => {
+    const err = Object.assign(new Error("timeout of 25000ms exceeded"), { code: "ECONNABORTED" });
+    assert.equal(websiteReadError(err), "it took too long to respond");
   });
 
   it("falls back for unknown failures and no response at all", () => {

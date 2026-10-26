@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useAppStore } from "../lib/store";
-import { PlusIcon } from "./Icons";
+import { GearIcon, PlusIcon } from "./Icons";
 
 export function WorkspaceSelector() {
   const {
@@ -73,19 +73,10 @@ export function WorkspaceSelector() {
       {/* Dropdown Menu */}
       {isOpen && (
         <div className="absolute left-0 mt-2 w-80 rounded-xl bg-slate-950 border border-slate-800 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-          <div className="px-2.5 py-1.5 border-b border-slate-800/80 mb-1 flex items-center justify-between">
+          <div className="px-2.5 py-1.5 border-b border-slate-800/80 mb-1">
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
               Business Profiles ({workspaces.length})
             </span>
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                setBusinessProfileOpen(true);
-              }}
-              className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium"
-            >
-              Profile Settings
-            </button>
           </div>
 
           <div className="max-h-64 overflow-y-auto space-y-1 py-1">
@@ -93,40 +84,68 @@ export function WorkspaceSelector() {
               const wsId = ws.id || ws._id;
               const isSelected = wsId === currentId;
               return (
-                <button
+                <div
                   key={wsId}
-                  onClick={() => {
-                    if (!isSelected) switchWorkspace(wsId);
-                    setIsOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-xs transition ${
+                  className={`flex items-center rounded-lg text-xs transition ${
                     isSelected
                       ? "bg-indigo-600/20 text-indigo-200 border border-indigo-500/30"
                       : "text-slate-300 hover:bg-slate-900"
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 truncate">
-                    <span className="text-sm shrink-0">🏢</span>
-                    <div className="truncate">
-                      <div className="font-medium truncate text-slate-100">
-                        {ws.name || "Untitled Profile"}
-                      </div>
-                      {ws.businessType && (
-                        <div className="text-[10px] text-slate-400 truncate">
-                          {ws.businessType}
+                  <button
+                    onClick={() => {
+                      if (!isSelected) switchWorkspace(wsId);
+                      setIsOpen(false);
+                    }}
+                    className="flex-1 min-w-0 flex items-center justify-between pl-2.5 pr-1 py-2 text-left"
+                  >
+                    <div className="flex items-center gap-2.5 truncate">
+                      <span className="text-sm shrink-0">🏢</span>
+                      <div className="truncate">
+                        <div className="font-medium truncate text-slate-100">
+                          {ws.name || "Untitled Profile"}
                         </div>
-                      )}
+                        {ws.businessType && (
+                          <div className="text-[10px] text-slate-400 truncate">
+                            {ws.businessType}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-400 capitalize">
-                      {ws.role || "member"}
-                    </span>
-                    {isSelected && (
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-                    )}
-                  </div>
-                </button>
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-400 capitalize">
+                        {ws.role || "member"}
+                      </span>
+                      <span
+                        className={`flex items-center gap-1 text-[10px] font-medium ${
+                          isSelected ? "text-emerald-300" : "text-red-300"
+                        }`}
+                      >
+                        <span
+                          className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? "bg-emerald-400" : "bg-red-500"}`}
+                        />
+                        {isSelected ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                  </button>
+                  {isSelected ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsOpen(false);
+                        setBusinessProfileOpen(true);
+                      }}
+                      title={`${ws.name || "Profile"} settings`}
+                      aria-label={`${ws.name || "Profile"} settings`}
+                      className="shrink-0 p-2 mr-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                    >
+                      <GearIcon className="w-3.5 h-3.5" />
+                    </button>
+                  ) : (
+                    // Same width as the gear, so the statuses line up.
+                    <span className="shrink-0 w-[30px] mr-1" aria-hidden="true" />
+                  )}
+                </div>
               );
             })}
           </div>

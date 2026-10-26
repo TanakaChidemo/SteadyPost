@@ -19,6 +19,7 @@ import {
   filledLabels,
   nameSuggestion,
   prefillFromWebsite,
+  isWebsiteAsleep,
   websiteReadError,
 } from "../lib/websitePrefill";
 import { ChipPicker, Field, LocationFields, NameSuggestion, inputClass } from "./ProfileFields";
@@ -59,7 +60,8 @@ function fromProfile(profile) {
 // What the wizard knows about the website: the URL it last read, the name
 // the site gives (offered as a suggestion only), the fields the read filled
 // in, and why it failed if it did.
-const NO_SITE = { readUrl: "", name: null, filled: [], error: null };
+// `asleep`: the read timed out, so the site may have been waking up and trying again is worth it.
+const NO_SITE = { readUrl: "", name: null, filled: [], error: null, asleep: false };
 
 /**
  * Step-by-step onboarding (F01 #04). In "create" mode it creates a new
@@ -161,6 +163,7 @@ export function OnboardingWizard({ prefill = null }) {
         ...NO_SITE,
         readUrl: url,
         error: websiteReadError(err),
+        asleep: isWebsiteAsleep(err),
       });
     } finally {
       setReading(false);
@@ -273,7 +276,25 @@ export function OnboardingWizard({ prefill = null }) {
 
               {current.id === "business" && (
                 <>
-                  {site.error ? (
+                  {site.error && site.asleep ? (
+                    <div className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 space-y-2">
+                      <p>
+                        Your website took too long to respond. It may have been asleep: some hosts pause sites
+                        that haven&apos;t had visitors, and our visit wakes them up, so trying again usually works.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <button
+                          type="button"
+                          disabled={reading}
+                          onClick={() => readWebsite(site.readUrl)}
+                          className="px-2.5 py-1 rounded-md border border-amber-400/40 bg-amber-500/10 font-semibold hover:bg-amber-500/20 transition disabled:opacity-50"
+                        >
+                          {reading ? "Trying again..." : "Try again"}
+                        </button>
+                        <span className="text-amber-200/80">or fill in your details below.</span>
+                      </div>
+                    </div>
+                  ) : site.error ? (
                     <p className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
                       We couldn&apos;t read your website: {site.error}. Fill in your details below instead, or
                       go back and check the address.

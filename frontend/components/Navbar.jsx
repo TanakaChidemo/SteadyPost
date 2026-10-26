@@ -30,6 +30,9 @@ export function Navbar() {
     ["owner", "editor"].includes(currentWorkspace.role) &&
     !onboardingDismissed.includes(workspaceId);
 
+  // The channels pill counts the active profile's channels, so it needs one that's set up.
+  const hasProfile = Boolean(user && workspaceId && currentWorkspace.onboardingComplete);
+
   useEffect(() => {
     if (needsOnboarding && !onboarding) openOnboarding("complete");
     // Only re-check when the workspace or its status changes, not on close.
@@ -58,26 +61,36 @@ export function Navbar() {
 
       <div className="flex items-center gap-3">
         {/* Connected Channels Pill */}
-        <Link
-          href="/dashboard/accounts"
-          className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:border-slate-700 transition"
-        >
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>{socialAccounts.length} Channels Connected</span>
-        </Link>
+        {hasProfile && (
+          <Link
+            href="/dashboard/accounts"
+            className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:border-slate-700 transition"
+          >
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>{socialAccounts.length} Channels Connected</span>
+          </Link>
+        )}
 
         {/* AI Assistant Quick Trigger */}
-        <button
-          onClick={() => setAiModalOpen(true)}
-          className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border border-purple-500/40 text-purple-200 hover:border-purple-400 text-xs font-medium transition"
-        >
-          <SparklesIcon className="w-4 h-4 text-purple-400" />
-          <span className="hidden sm:inline">AI Studio</span>
-        </button>
+        {user && (
+          <button
+            onClick={() => setAiModalOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border border-purple-500/40 text-purple-200 hover:border-purple-400 text-xs font-medium transition"
+          >
+            <SparklesIcon className="w-4 h-4 text-purple-400" />
+            <span className="hidden sm:inline">AI Studio</span>
+          </button>
+        )}
 
-        {/* Create Post Action */}
+        {/* Create Post Action (signed out, it asks you to sign in instead) */}
         <Link
           href="/dashboard/content"
+          onClick={(e) => {
+            if (!user) {
+              e.preventDefault();
+              setAuthModalOpen(true);
+            }
+          }}
           className="flex items-center gap-1.5 px-4 py-1.5 rounded gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
         >
           <PlusIcon className="w-4 h-4" />

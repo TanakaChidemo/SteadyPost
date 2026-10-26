@@ -13,13 +13,41 @@ import {
   knownKeys,
   profileErrorMessage,
 } from "../lib/profileOptions";
-import { nameSuggestion, websiteReadError } from "../lib/websitePrefill";
+import { isWebsiteAsleep, nameSuggestion, websiteReadError } from "../lib/websitePrefill";
 import { ChipPicker, Field, LocationFields, NameSuggestion, inputClass } from "./ProfileFields";
+
+/**
+ * Reads a saved website into the workspace's connection (#03.1). The profile is
+ * already saved, so a failure only warns, and a site that timed out (likely
+ * asleep) gets a Try again button.
+ */
+function readSavedWebsite(url, workspaceId, addToast, isRetry = false) {
+  api.website
+    .connect(url, workspaceId)
+    .then(() => isRetry && addToast("success", "Read your website"))
+    .catch((err) => {
+      if (isWebsiteAsleep(err)) {
+        addToast("info", "Saved, but your website took too long to respond. It may have been asleep.", {
+          label: "Try again",
+          onClick: () => readSavedWebsite(url, workspaceId, addToast, true),
+        });
+      } else {
+        addToast("info", `Saved, but we couldn't read your website: ${websiteReadError(err)}`);
+      }
+    });
+}
 
 /** Edits the current workspace's profile. New profiles go through the onboarding wizard. */
 export function BusinessProfileModal() {
-  const { isBusinessProfileOpen, setBusinessProfileOpen, currentWorkspace, fetchWorkspaces, openOnboarding, addToast } =
-    useAppStore();
+  const {
+    isBusinessProfileOpen,
+    setBusinessProfileOpen,
+    currentWorkspace,
+    workspaces,
+    fetchWorkspaces,
+    openOnboarding,
+    addToast,
+  } = useAppStore();
 
   const [activeTab, setActiveTab] = useState("profile"); // "profile" | "notifications"
   const [loading, setLoading] = useState(false);
@@ -125,11 +153,7 @@ export function BusinessProfileModal() {
       // stays current. The profile is already saved, so a failure only warns.
       const url = normaliseWebsiteUrl(websiteUrl);
       if (url && url !== savedWebsiteUrl) {
-        api.website
-          .connect(url)
-          .catch((err) =>
-            addToast("info", `Saved, but we couldn't read your website: ${websiteReadError(err)}`)
-          );
+        readSavedWebsite(url, currentWorkspace.id || currentWorkspace._id, addToast);
       }
     } catch (err) {
       addToast("error", profileErrorMessage(err, "Failed to update profile"));
@@ -139,8 +163,9 @@ export function BusinessProfileModal() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="w-full max-w-xl rounded-2xl bg-slate-950 border border-slate-800 shadow-2xl p-6 relative animate-in fade-in zoom-in-95 duration-100">
+    <div className="fixed inset-0 z-50 flex bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+      {/* m-auto rather than items-center: centred when it fits, scrollable from the top when it doesn't */}
+      <div className="m-auto w-full max-w-xl rounded-2xl bg-slate-950 border border-slate-800 shadow-2xl p-6 relative animate-in fade-in zoom-in-95 duration-100">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-5">
           <div>
@@ -370,7 +395,111 @@ export function BusinessProfileModal() {
             </div>
           </form>
         )}
+
+        {!loading && activeTab === "profile" && currentWorkspace?.role === "owner" && (
+          <ArchiveWorkspace
+            key={currentWorkspace.id || currentWorkspace._id}
+            workspaceName={currentWorkspace.name}
+            isOnlyWorkspace={workspaces.length <= 1}
+            onArchived={() => setBusinessProfileOpen(false)}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Owner-only. Archiving hides the workspace from everyone but keeps its data;
+ * the owner confirms by typing its name, and can't archive their only one.
+ */
+function ArchiveWorkspace({ workspaceName, isOnlyWorkspace, onArchived }) {
+  const archiveWorkspace = useAppStore((state) => state.archiveWorkspace);
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [archiving, setArchiving] = useState(false);
+  const [error, setError] = useState("");
+
+  const nameMatches = typed.trim() === (workspaceName || "").trim();
+
+  async function handleArchive() {
+    if (!nameMatches || archiving) return;
+    try {
+      setArchiving(true);
+      setError("");
+      await archiveWorkspace();
+      onArchived();
+    } catch (err) {
+      setError(profileErrorMessage(err, "Couldn't archive this workspace"));
+      setArchiving(false);
+    }
+  }
+
+  return (
+    <div className="mt-6 pt-4 border-t border-red-500/20">
+      <div className="text-xs font-semibold text-red-300">Archive this workspace</div>
+      <p className="text-[11px] text-slate-400 mt-0.5">
+        It disappears from the profile list for everyone in it and can&apos;t be opened. Its posts, linked
+        accounts and settings are kept, not deleted.
+      </p>
+
+      {isOnlyWorkspace && (
+        <p className="text-[11px] text-slate-500 mt-2">
+          You can&apos;t archive your only workspace. Create another one first.
+        </p>
+      )}
+
+      {!confirming ? (
+        <button
+          type="button"
+          disabled={isOnlyWorkspace}
+          onClick={() => setConfirming(true)}
+          className="mt-3 px-4 py-2 rounded-lg border border-red-500/40 text-xs font-semibold text-red-300 hover:bg-red-500/10 transition disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Archive this Workspace
+        </button>
+      ) : (
+        <div className="mt-3 space-y-2">
+          <label htmlFor="archive-confirm" className="block text-[11px] text-slate-300">
+            Type <span className="font-semibold text-white">{workspaceName}</span> to confirm.
+          </label>
+          <input
+            id="archive-confirm"
+            type="text"
+            autoFocus
+            autoComplete="off"
+            value={typed}
+            onChange={(e) => {
+              setTyped(e.target.value);
+              setError("");
+            }}
+            onKeyDown={(e) => e.key === "Enter" && handleArchive()}
+            className={inputClass}
+          />
+          {error && <p className="text-[11px] text-red-400">{error}</p>}
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setConfirming(false);
+                setTyped("");
+                setError("");
+              }}
+              className="px-4 py-2 rounded-lg border border-slate-800 text-xs text-slate-300 hover:bg-slate-900 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!nameMatches || archiving}
+              onClick={handleArchive}
+              className="px-4 py-2 rounded-lg bg-red-600 text-xs font-semibold text-white hover:bg-red-500 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {archiving ? "Archiving..." : "Archive this Workspace"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

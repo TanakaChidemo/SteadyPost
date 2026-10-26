@@ -121,6 +121,17 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
+  // Archives the current workspace and moves to the one the server picked.
+  // Throws on failure so the caller can show why.
+  archiveWorkspace: async () => {
+    const { archived, activeWorkspaceId } = await api.workspaces.archiveCurrent();
+    setActiveWorkspaceId(activeWorkspaceId);
+    await get().fetchWorkspaces();
+    api.socialAccounts.list().then((accounts) => set({ socialAccounts: accounts })).catch(() => {});
+    api.content.list().then((drafts) => set({ drafts })).catch(() => {});
+    get().addToast("success", `Archived ${archived.name}`);
+  },
+
   expireSession: () => {
     clearTokens();
     set({ user: null, token: null, workspaces: [], currentWorkspace: null });
@@ -146,12 +157,13 @@ export const useAppStore = create((set, get) => ({
       onboardingDismissed: [...state.onboardingDismissed, workspaceId],
     })),
 
-  addToast: (type, text) => {
+  // `action` ({ label, onClick }) adds a button; such toasts stay up longer.
+  addToast: (type, text, action) => {
     const id = `toast_${Date.now()}_${Math.random()}`;
-    set((state) => ({ toasts: [...state.toasts, { id, type, text }] }));
+    set((state) => ({ toasts: [...state.toasts, { id, type, text, action }] }));
     setTimeout(() => {
       get().removeToast(id);
-    }, 4000);
+    }, action ? 10000 : 4000);
   },
 
   removeToast: (id) => {

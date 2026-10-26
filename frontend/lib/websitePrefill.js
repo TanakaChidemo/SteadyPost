@@ -109,6 +109,18 @@ const READ_ERRORS = {
   INVALID_URL: "that doesn't look like a website address",
 };
 
+/**
+ * True when the site didn't answer in time, on the server or in the browser.
+ * Sites on some hosts sleep when they've had no visitors and take a while to
+ * wake on the first visit, so trying again usually works.
+ */
+export function isWebsiteAsleep(err) {
+  if (!err?.response) return err?.code === "ECONNABORTED";
+  return err.response.data?.code === "TIMEOUT";
+}
+
 export function websiteReadError(err) {
+  // No reply before the browser's own time limit (axios reports ECONNABORTED).
+  if (!err?.response && err?.code === "ECONNABORTED") return READ_ERRORS.TIMEOUT;
   return READ_ERRORS[err?.response?.data?.code] || "we couldn't reach it";
 }

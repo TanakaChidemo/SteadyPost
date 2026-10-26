@@ -17,6 +17,7 @@ tags:
   - name: SocialAccounts
   - name: Website
   - name: BusinessProfile
+  - name: Workspaces
 
 paths:
   /auth/register:
@@ -219,6 +220,28 @@ paths:
         "200": { description: Updated business profile (same shape as GET) }
         "400": { description: Validation failed (`details` lists each problem) }
         "403": { description: Not a member of the workspace, or a viewer }
+
+  /workspaces/current/archive:
+    post:
+      tags: [Workspaces]
+      summary: Archive the current workspace
+      description: >
+        Owner only. Nothing is deleted: the workspace, its profile, posts and
+        linked accounts are kept, but it no longer appears in any member's
+        workspace list and can't be opened, switched to or joined (requests
+        naming it get 404). An owner can't archive their only workspace. If it
+        was the owner's active workspace, another of theirs becomes active;
+        other members fall back to another of their workspaces on their next
+        request.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: >
+            Archived. `archived` gives its `id` and `name`; `activeWorkspaceId`
+            is the owner's active workspace afterwards.
+        "403": { description: Not a member of the workspace, or not its owner }
+        "404": { description: The workspace is already archived }
+        "409": { description: It's the owner's only workspace }
 
   /website/preview:
     post:
