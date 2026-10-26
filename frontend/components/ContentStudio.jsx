@@ -459,7 +459,7 @@ export function ContentStudio() {
                 className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5"
               >
                 <SparklesIcon className="w-4 h-4" />
-                <span>Optimize with AI</span>
+                <span>AI Omnichannel & Repurposer</span>
               </button>
             </div>
           </div>

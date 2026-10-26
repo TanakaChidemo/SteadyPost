@@ -359,3 +359,102 @@ def repurpose_content(content: str, source_platform: str, target_platforms: list
             results[target] = content
 
     return {"sourcePlatform": source_platform, "repurposed": results, "model": "local-ai-engine"}
+
+
+def generate_variants(
+    idea: str,
+    channels: list,
+    tone: str = "casual",
+    business_profile: dict | None = None,
+    source_post: dict | None = None,
+) -> dict:
+    client, model_name = _get_active_model_and_client()
+    variants = []
+
+    profile_context = ""
+    if business_profile:
+        b_type = business_profile.get("businessType", "")
+        b_aud = business_profile.get("audience", "")
+        b_off = business_profile.get("offer", "")
+        profile_context = (
+            f" Context: Business={b_type}, Audience={b_aud}, Offer={b_off}."
+        )
+
+    for ch in channels:
+        constraint = PLATFORM_CONSTRAINTS.get(ch, "general social media best practices")
+        title = f"{ch.capitalize()} Post: {idea[:30]}"
+        body = None
+
+        if client:
+            try:
+                system_prompt = (
+                    f"You are an expert social media copywriter. Write a platform-native post "
+                    f"for {ch} based on the given idea or past post. Constraints: {constraint}. "
+                    f"Tone: {tone}.{profile_context} Return only the post body text."
+                )
+                user_prompt = f"Core idea / content to adapt:\n{idea}"
+                if source_post and source_post.get("body"):
+                    user_prompt += f"\n\nSource post to repurpose:\n{source_post['body']}"
+
+                res = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.75,
+                )
+                body = res.choices[0].message.content.strip()
+            except Exception:
+                body = None
+
+        if not body:
+            if ch == "twitter":
+                trimmed = idea[:240] + ("..." if len(idea) > 240 else "")
+                body = f"🚀 {trimmed}\n\n#Growth #Innovation"
+            elif ch == "linkedin":
+                body = (
+                    f"A key strategic takeaway on:\n\n{idea}\n\n"
+                    "1. Focus on core leverage points\n2. Iterate rapidly\n"
+                    "3. Scale distribution sustainably\n\n"
+                    "What is your team's approach? Let's connect below.\n\n"
+                    "#Leadership #Strategy #B2B"
+                )
+            elif ch == "instagram":
+                body = (
+                    f"✨ {idea}\n\n"
+                    "Success comes from compounding small improvements every day. "
+                    "Save this post for your next strategy session! 📌\n\n"
+                    "#CreatorLife #ContentStrategy #GrowthMindset"
+                )
+            elif ch == "facebook":
+                body = (
+                    f"Excited to explore this with you today! 🌟\n\n{idea}\n\n"
+                    "What has your experience been with this? Share in the comments! 👇\n\n"
+                    "#Community #Growth"
+                )
+            else:
+                body = idea
+
+        tags = re.findall(r"#\w+", body)
+        variants.append({
+            "channel": ch,
+            "content": {
+                "title": title,
+                "body": body,
+                "hashtags": tags if tags else ["#Growth", "#Strategy"],
+                "mediaUrls": [],
+            },
+            "tone": tone,
+            "provider": "groq" if client else "local",
+            "model": model_name if client else "local-ai-engine",
+        })
+
+    return {
+        "idea": idea,
+        "tone": tone,
+        "variants": variants,
+        "provider": "groq" if client else "local",
+        "model": model_name if client else "local-ai-engine",
+    }
+

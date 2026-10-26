@@ -3,6 +3,8 @@ const postModel = require("../models/post.model");
 const approvalEventModel = require("../models/approvalEvent.model");
 const predictionRecordModel = require("../models/predictionRecord.model");
 const postMetricsModel = require("../models/postMetrics.model");
+const businessProfileModel = require("../models/businessProfile.model");
+const contentAdaptationService = require("../services/contentAdaptation.service");
 const { enqueuePublishJob } = require("../queue");
 
 const createPostSchema = z.object({
@@ -210,6 +212,237 @@ async function deletePost(req, res) {
   return res.status(204).send();
 }
 
+async function getTopPerforming(req, res) {
+  const { limit = 10, channel, metric = "engagement" } = req.query;
+  const result = await postMetricsModel.getTopPerformingForWorkspace(req.workspaceId, {
+    limit: Number(limit) || 10,
+    channel,
+    metric,
+  });
+  return res.json(result);
+}
+
+const generateVariantsSchema = z.object({
+  idea: z.string().min(1, "Idea or topic is required"),
+  channels: z.array(z.string()).optional(),
+  tone: z.string().optional(),
+  campaignId: z.string().optional().nullable(),
+  sourcePostId: z.string().optional().nullable(),
+  saveAsDrafts: z.boolean().optional(),
+});
+
+async function generateVariants(req, res) {
+  const parsed = generateVariantsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+
+  const { idea, channels, tone, campaignId = null, sourcePostId = null, saveAsDrafts = false } = parsed.data;
+
+  let effectiveTone = tone;
+  let businessProfile = null;
+  if (req.workspaceId) {
+    businessProfile = await businessProfileModel.findByWorkspaceId(req.workspaceId);
+    if (!effectiveTone && businessProfile?.tone?.length) {
+      effectiveTone = businessProfile.tone[0];
+    }
+  }
+  if (!effectiveTone) effectiveTone = "professional";
+
+  let sourcePost = null;
+  if (sourcePostId) {
+    sourcePost = await postModel.findById(sourcePostId);
+    if (!sourcePost || sourcePost.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ error: "Source post not found" });
+    }
+  }
+
+  const adaptationResult = await contentAdaptationService.adaptIdeaToChannels({
+    idea,
+    channels,
+    tone: effectiveTone,
+    businessProfile,
+    sourcePost,
+  });
+
+  if (saveAsDrafts && adaptationResult.variants?.length > 0) {
+    const createdDrafts = [];
+    for (const variant of adaptationResult.variants) {
+      const post = await postModel.create({
+        workspaceId: req.workspaceId,
+        authorId: req.user.id,
+        channel: variant.channel,
+        campaignId,
+        content: {
+          title: variant.content.title,
+          body: variant.content.body,
+          mediaUrls: variant.content.mediaUrls || [],
+          hashtags: variant.content.hashtags || [],
+        },
+        status: "draft",
+        origin: sourcePostId ? "manual" : campaignId ? "campaign" : "manual",
+        aiMetadata: {
+          provider: variant.provider,
+          model: variant.model,
+          tone: effectiveTone,
+          idea,
+          sourcePostId,
+          generatedAt: new Date(),
+        },
+        versions: [
+          {
+            body: variant.content.body,
+            editedAt: new Date(),
+            editedBy: req.user.id,
+          },
+        ],
+      });
+      createdDrafts.push(post);
+      variant.post = post;
+    }
+    adaptationResult.savedDrafts = createdDrafts;
+  }
+
+  return res.json(adaptationResult);
+}
+
+const repurposePostSchema = z.object({
+  targetChannels: z.array(z.string()).min(1, "At least one target channel is required"),
+  tone: z.string().optional(),
+  saveAsDrafts: z.boolean().optional(),
+});
+
+async function repurposePost(req, res) {
+  const post = await postModel.findById(req.params.id);
+  if (!post || post.workspaceId !== req.workspaceId) {
+    return res.status(404).json({ error: "Post not found" });
+  }
+
+  const parsed = repurposePostSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+
+  const { targetChannels, tone, saveAsDrafts = false } = parsed.data;
+
+  let effectiveTone = tone;
+  let businessProfile = null;
+  if (req.workspaceId) {
+    businessProfile = await businessProfileModel.findByWorkspaceId(req.workspaceId);
+    if (!effectiveTone && businessProfile?.tone?.length) {
+      effectiveTone = businessProfile.tone[0];
+    }
+  }
+  if (!effectiveTone) effectiveTone = "professional";
+
+  const ideaText = `${post.content?.title ? post.content.title + ": " : ""}${post.content?.body || ""}`;
+
+  const adaptationResult = await contentAdaptationService.adaptIdeaToChannels({
+    idea: ideaText,
+    channels: targetChannels,
+    tone: effectiveTone,
+    businessProfile,
+    sourcePost: post,
+  });
+
+  if (saveAsDrafts && adaptationResult.variants?.length > 0) {
+    const createdDrafts = [];
+    for (const variant of adaptationResult.variants) {
+      const newPost = await postModel.create({
+        workspaceId: req.workspaceId,
+        authorId: req.user.id,
+        channel: variant.channel,
+        campaignId: post.campaignId || null,
+        content: {
+          title: variant.content.title,
+          body: variant.content.body,
+          mediaUrls: post.content?.mediaUrls || [],
+          hashtags: variant.content.hashtags || [],
+        },
+        status: "draft",
+        origin: "manual",
+        aiMetadata: {
+          provider: variant.provider,
+          model: variant.model,
+          tone: effectiveTone,
+          sourcePostId: post.id,
+          repurposed: true,
+          generatedAt: new Date(),
+        },
+        versions: [
+          {
+            body: variant.content.body,
+            editedAt: new Date(),
+            editedBy: req.user.id,
+          },
+        ],
+      });
+      createdDrafts.push(newPost);
+      variant.post = newPost;
+    }
+    adaptationResult.savedDrafts = createdDrafts;
+  }
+
+  return res.json({
+    sourcePost: {
+      id: post.id,
+      channel: post.channel,
+      title: post.content?.title,
+      body: post.content?.body,
+    },
+    ...adaptationResult,
+  });
+}
+
+const batchCreateSchema = z.object({
+  posts: z
+    .array(
+      z.object({
+        title: z.string().optional(),
+        body: z.string().min(1, "Post body is required"),
+        channel: z.string().min(1, "Channel is required"),
+        campaignId: z.string().optional().nullable(),
+        mediaUrls: z.array(z.string()).optional(),
+        hashtags: z.array(z.string()).optional(),
+        aiMetadata: z.record(z.any()).optional(),
+      })
+    )
+    .min(1, "At least one post is required"),
+});
+
+async function batchCreate(req, res) {
+  const parsed = batchCreateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+
+  const itemsToInsert = parsed.data.posts.map((item) => ({
+    workspaceId: req.workspaceId,
+    authorId: req.user.id,
+    channel: item.channel,
+    campaignId: item.campaignId || null,
+    content: {
+      title: item.title || "Untitled Post",
+      body: item.body,
+      mediaUrls: item.mediaUrls || [],
+      hashtags: item.hashtags || [],
+    },
+    status: "draft",
+    origin: "manual",
+    aiMetadata: item.aiMetadata || {},
+    versions: [
+      {
+        body: item.body,
+        editedAt: new Date(),
+        editedBy: req.user.id,
+      },
+    ],
+  }));
+
+  const createdPosts = await postModel.createMany(itemsToInsert);
+  return res.status(201).json({ items: createdPosts });
+}
+
 module.exports = {
   list,
   create,
@@ -220,4 +453,8 @@ module.exports = {
   requestChanges,
   publishNow,
   deletePost,
+  getTopPerforming,
+  generateVariants,
+  repurposePost,
+  batchCreate,
 };

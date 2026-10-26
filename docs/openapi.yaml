@@ -13,6 +13,7 @@ tags:
   - name: Auth
   - name: Content
   - name: AI
+  - name: Posts
   - name: Publish
   - name: SocialAccounts
   - name: Website
@@ -158,6 +159,110 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         "200": { description: Repurposed content per platform }
+
+  /ai/generate-variants:
+    post:
+      tags: [AI]
+      summary: Generate platform-native variants from an idea
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idea]
+              properties:
+                idea: { type: string }
+                channels: { type: array, items: { type: string } }
+                tone: { type: string }
+      responses:
+        "200": { description: Platform-native variants }
+
+  /posts/generate-variants:
+    post:
+      tags: [Posts]
+      summary: Generate platform-native variants and optionally save as drafts
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idea]
+              properties:
+                idea: { type: string }
+                channels: { type: array, items: { type: string } }
+                tone: { type: string }
+                saveAsDrafts: { type: boolean }
+      responses:
+        "200": { description: Generated variants with optional saved drafts }
+
+  /posts/top-performing:
+    get:
+      tags: [Posts]
+      summary: Get top performing workspace posts (PostMetrics read path)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+        - name: channel
+          in: query
+          schema: { type: string }
+        - name: metric
+          in: query
+          schema: { type: string, default: engagement }
+      responses:
+        "200": { description: Top performing posts ranked by engagement score }
+
+  /posts/{id}/repurpose:
+    post:
+      tags: [Posts]
+      summary: Repurpose a specific post into platform-native variants for target channels
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetChannels]
+              properties:
+                targetChannels: { type: array, items: { type: string } }
+                tone: { type: string }
+                saveAsDrafts: { type: boolean }
+      responses:
+        "200": { description: Repurposed variants }
+
+  /posts/batch-create:
+    post:
+      tags: [Posts]
+      summary: Batch create multiple draft posts
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [posts]
+              properties:
+                posts:
+                  type: array
+                  items:
+                    type: object
+                    required: [channel, body]
+                    properties:
+                      channel: { type: string }
+                      title: { type: string }
+                      body: { type: string }
+                      hashtags: { type: array, items: { type: string } }
+      responses:
+        "201": { description: Created posts }
 
   /publish/now:
     post:

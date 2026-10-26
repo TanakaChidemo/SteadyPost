@@ -4,6 +4,7 @@ from app.services.content_generator import (
     generate_caption,
     generate_hashtags,
     repurpose_content,
+    generate_variants,
 )
 
 generate_bp = Blueprint("generate", __name__)
@@ -51,5 +52,27 @@ def repurpose():
         content=content,
         source_platform=source_platform,
         target_platforms=target_platforms,
+    )
+    return jsonify(result)
+
+
+@generate_bp.post("/variants")
+def variants():
+    payload = request.get_json(silent=True) or {}
+    idea = payload.get("idea") or payload.get("topic")
+    channels = payload.get("channels", ["twitter", "linkedin", "instagram", "facebook"])
+    tone = payload.get("tone", "casual")
+    business_profile = payload.get("businessProfile")
+    source_post = payload.get("sourcePost")
+
+    if not idea:
+        return jsonify(error="`idea` or `topic` is required"), 400
+
+    result = generate_variants(
+        idea=idea,
+        channels=channels,
+        tone=tone,
+        business_profile=business_profile,
+        source_post=source_post,
     )
     return jsonify(result)

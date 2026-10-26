@@ -9,5 +9,6 @@ router.use(requireAuth, resolveWorkspace);
 router.post("/generate-caption", aiController.generateCaption);
 router.post("/suggest-hashtags", aiController.suggestHashtags);
 router.post("/repurpose", aiController.repurposeContent);
+router.post("/generate-variants", aiController.generateVariants);
 
 module.exports = router;
