@@ -1,6 +1,20 @@
 const contentAdaptationService = require("../src/services/contentAdaptation.service");
 
 describe("Post Generation & Adaptation Unit Tests (#05)", () => {
+  beforeEach(() => {
+    jest.spyOn(global, "fetch").mockImplementation(() =>
+      Promise.resolve({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: "Mock AI unavailable" }),
+      })
+    );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it("adapts idea with specific tone across multiple platforms", async () => {
     const idea = "SteadyPost simplifies social publishing for modern businesses.";
     const result = await contentAdaptationService.adaptIdeaToChannels({
@@ -43,16 +57,14 @@ describe("Post Generation & Adaptation Unit Tests (#05)", () => {
     expect(channels).toEqual(["facebook", "instagram"]);
   });
 
-  it("defaults to instagram and facebook when no valid channels are given", async () => {
-    const result = await contentAdaptationService.adaptIdeaToChannels({
-      idea: "Test idea",
-      channels: ["unknown_channel"],
-      tone: "casual",
-    });
-
-    expect(result.variants.length).toBe(2);
-    const channels = result.variants.map((v) => v.channel);
-    expect(channels).toEqual(["instagram", "facebook"]);
+  it("rejects when only unknown channels are given", async () => {
+    await expect(
+      contentAdaptationService.adaptIdeaToChannels({
+        idea: "Test idea",
+        channels: ["unknown_channel"],
+        tone: "casual",
+      })
+    ).rejects.toThrow("None of the requested channels are supported");
   });
 
   it("preserves media URLs and links when repurposing a post", async () => {

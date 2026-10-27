@@ -43,7 +43,7 @@ def test_generate_variants_fallback_labels():
     assert result["idea"] == idea
     assert len(result["variants"]) == 2
     for v in result["variants"]:
-        assert v["provider"] in ("groq", "template")
+        assert v["provider"] in ("groq", "openrouter", "gemini", "openai", "template")
         if v["provider"] == "template":
             assert v["model"] == "template-fallback"
         assert v["channel"] in ("instagram", "facebook")
@@ -57,6 +57,13 @@ def test_generate_variants_channel_filtering_and_deduplication():
     )
     channels_returned = [v["channel"] for v in result["variants"]]
     assert channels_returned == ["facebook", "instagram"]
+
+
+def test_generate_variants_unknown_channels_only():
+    import pytest
+
+    with pytest.raises(ValueError, match="None of the requested channels are supported"):
+        generate_variants(idea="Test idea", channels=["tiktok", "myspace"])
 
 
 def test_generate_variants_default_channels():

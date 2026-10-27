@@ -4,9 +4,13 @@ import React, { useState, useEffect } from "react";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
 import { loadFacebookSdk } from "../lib/facebookSdk";
+import { SetupWalkthroughModal } from "./SetupWalkthroughModal";
 import {
   InstagramIcon,
   FacebookIcon,
+  TwitterIcon,
+  LinkedInIcon,
+  GoogleIcon,
   PlusIcon,
   CheckIcon,
 } from "./Icons";
@@ -31,11 +35,33 @@ const AVAILABLE_CHANNELS = [
     color: "text-blue-500 border-blue-600/30 bg-blue-600/10",
     description: "Publish community updates, media assets, and engage your fan base.",
   },
+  {
+    platform: "twitter",
+    name: "Twitter / X Account",
+    icon: TwitterIcon,
+    color: "text-sky-400 border-sky-500/30 bg-sky-500/10",
+    description: "Publish real-time announcements, short-form insights, and campaign updates.",
+  },
+  {
+    platform: "linkedin",
+    name: "LinkedIn Organization / Profile",
+    icon: LinkedInIcon,
+    color: "text-blue-400 border-blue-500/30 bg-blue-500/10",
+    description: "Publish industry thought leadership, company news, and professional articles.",
+  },
+  {
+    platform: "gbp",
+    name: "Google Business Profile (#13)",
+    icon: GoogleIcon,
+    color: "text-amber-400 border-amber-500/30 bg-amber-500/10",
+    description: "Publish GBP Local Posts with call-to-action buttons, offers, and local search visibility.",
+  },
 ];
 
 export function SocialAccountsManager() {
   const { authReady, token, socialAccounts, setSocialAccounts, addToast } = useAppStore();
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
+  const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState("instagram");
   const [accountHandle, setAccountHandle] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -82,11 +108,17 @@ export function SocialAccountsManager() {
 
   async function handleMetaLoginResponse(accessToken) {
     try {
-      const { pages } = await api.auth.listMetaPages(accessToken);
-      if (pages.length === 0) {
-        addToast("error", META_ERROR_MESSAGES.no_facebook_page_found);
+      const res = await api.auth.listMetaPages(accessToken);
+      const pages = res.pages || [];
+
+      // When no Page or professional account is found, hand off to the setup walkthrough (#08, F27)
+      if (pages.length === 0 || res.handoff === "setup_walkthrough") {
+        setIsConnectModalOpen(false);
+        setIsWalkthroughOpen(true);
+        addToast("info", "No Facebook Page found. Opening Setup Walkthrough (#08, F27)...");
         return;
       }
+
       if (pages.length === 1) {
         await connectMetaPage(accessToken, pages[0].id);
         return;
@@ -96,6 +128,10 @@ export function SocialAccountsManager() {
       setMetaPages(pages);
     } catch (err) {
       const reason = err.response?.data?.error;
+      if (reason === "no_facebook_page_found" || err.response?.data?.handoff === "setup_walkthrough") {
+        setIsConnectModalOpen(false);
+        setIsWalkthroughOpen(true);
+      }
       addToast("error", META_ERROR_MESSAGES[reason] || "Could not list your Facebook Pages");
     } finally {
       setMetaConnecting(false);
@@ -113,6 +149,10 @@ export function SocialAccountsManager() {
       loadAccounts();
     } catch (err) {
       const reason = err.response?.data?.error;
+      if (reason === "no_facebook_page_found" || err.response?.data?.handoff === "setup_walkthrough") {
+        setIsConnectModalOpen(false);
+        setIsWalkthroughOpen(true);
+      }
       addToast("error", META_ERROR_MESSAGES[reason] || "Could not complete Meta connection");
     } finally {
       setConnectingPageId(null);
@@ -173,21 +213,30 @@ export function SocialAccountsManager() {
           </p>
         </div>
 
-        <button
-          onClick={() => setIsConnectModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
-        >
-          <PlusIcon className="w-4 h-4" />
-          <span>Connect New Channel</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsWalkthroughOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white transition"
+          >
+            <span>Setup Walkthrough (#08)</span>
+          </button>
+          <button
+            onClick={() => setIsConnectModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
+          >
+            <PlusIcon className="w-4 h-4" />
+            <span>Connect New Channel</span>
+          </button>
+        </div>
       </div>
 
-      {/* Channel Cards Grid — one section per platform, listing every
-          connected account (a user can manage more than one Facebook Page) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* Channel Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {AVAILABLE_CHANNELS.map((ch) => {
           const Icon = ch.icon;
-          const connectedAccounts = socialAccounts.filter((a) => a.platform === ch.platform);
+          const connectedAccounts = socialAccounts.filter(
+            (a) => a.platform === ch.platform || (ch.platform === "gbp" && a.platform === "google_business")
+          );
 
           return (
             <div
@@ -241,7 +290,7 @@ export function SocialAccountsManager() {
                         <div className="flex items-center justify-between text-slate-300">
                           <span className="text-slate-500 font-medium">Status:</span>
                           <span className="text-emerald-400 font-medium">
-                            {account.isLive ? "Connected via Meta · Live" : "Demo Account · Sandbox"}
+                            {account.isLive ? "Connected · Live" : "Demo Account · Sandbox"}
                           </span>
                         </div>
                       </div>
@@ -366,63 +415,79 @@ export function SocialAccountsManager() {
                 </div>
 
                 <p className="text-[11px] text-slate-500 mb-3">
-                  No real Meta app configured on this server? Link a demo account by name instead — it
-                  will not be able to publish to the real Graph API.
+                  No live platform token configured? Link a demo account by name — it simulates publishing and collects metrics in the job queue.
                 </p>
 
                 <form onSubmit={handleConnect} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Platform</label>
-                <select
-                  value={selectedChannel}
-                  onChange={(e) => setSelectedChannel(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="instagram">Instagram Business</option>
-                  <option value="facebook">Facebook Page</option>
-                </select>
-              </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">Platform</label>
+                    <select
+                      value={selectedChannel}
+                      onChange={(e) => setSelectedChannel(e.target.value)}
+                      className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="instagram">Instagram Business</option>
+                      <option value="facebook">Facebook Page</option>
+                      <option value="twitter">Twitter / X</option>
+                      <option value="linkedin">LinkedIn</option>
+                      <option value="gbp">Google Business Profile (GBP Local Posts #13)</option>
+                    </select>
+                  </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Account Handle or Page ID
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={accountHandle}
-                  onChange={(e) => setAccountHandle(e.target.value)}
-                  placeholder="@company_official or page_109238"
-                  className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Account Handle or Page ID
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={accountHandle}
+                      onChange={(e) => setAccountHandle(e.target.value)}
+                      placeholder="@company_official or page_109238"
+                      className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Display Label (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g. Brand Main Page"
-                  className="w-full px-3.5 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Display Label (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder="e.g. Brand Main Page"
+                      className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
-              >
-                {loading ? "Authorizing..." : "Link Channel"}
-              </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full py-2.5 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
+                  >
+                    {loading ? "Authorizing..." : "Link Channel"}
+                  </button>
                 </form>
               </>
             )}
           </div>
         </div>
       )}
+
+      {/* Setup Walkthrough Modal (#08, F27) */}
+      <SetupWalkthroughModal
+        isOpen={isWalkthroughOpen}
+        onClose={() => setIsWalkthroughOpen(false)}
+        onRetryConnect={() => {
+          setIsWalkthroughOpen(false);
+          handleConnectWithMeta();
+        }}
+        onUseSandbox={() => {
+          setIsWalkthroughOpen(false);
+          setIsConnectModalOpen(true);
+        }}
+      />
     </div>
   );
 }

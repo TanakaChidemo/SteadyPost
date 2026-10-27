@@ -63,6 +63,20 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
     }
   });
 
+  beforeEach(() => {
+    jest.spyOn(global, "fetch").mockImplementation(() =>
+      Promise.resolve({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: "AI service mock fallback" }),
+      })
+    );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   afterAll(async () => {
     if (isDbAvailable && workspace) {
       await workspaceModel.deleteOne({ _id: workspace.id });
@@ -353,5 +367,84 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("Validation failed");
+  });
+
+  it("rejects generation requests with only unknown channels with 400", async () => {
+    if (!isDbAvailable) return;
+
+    const res = await request(app)
+      .post("/api/v1/posts/generate-variants")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .set("X-Workspace-Id", workspace.id)
+      .send({
+        idea: "Testing channel validation",
+        channels: ["tiktok"],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("None of the requested channels are supported");
+  });
+
+  it("allows saved drafts to be edited and deleted without phantom duplicates", async () => {
+    if (!isDbAvailable) return;
+
+    // 1. Batch create draft via /posts/batch-create
+    const createRes = await request(app)
+      .post("/api/v1/posts/batch-create")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .set("X-Workspace-Id", workspace.id)
+      .send({
+        posts: [
+          {
+            title: "Artisan Bread Special",
+            body: "Delicious hot sourdough fresh out of the oven!",
+            channel: "instagram",
+          },
+        ],
+      });
+
+    expect(createRes.status).toBe(201);
+    const draftId = createRes.body.items[0]._id || createRes.body.items[0].id;
+    expect(draftId).toBeDefined();
+
+    // 2. Edit draft title and body via /content/:id
+    const updateRes = await request(app)
+      .put(`/api/v1/content/${draftId}`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .set("X-Workspace-Id", workspace.id)
+      .send({
+        title: "Artisan Bread Special - Updated",
+        body: "Updated sourdough recipe available this weekend!",
+      });
+
+    expect(updateRes.status).toBe(200);
+
+    // 3. Verify drafts list has only 1 item for this draft (no duplicates created by broken text match)
+    const listRes = await request(app)
+      .get("/api/v1/content/drafts")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .set("X-Workspace-Id", workspace.id);
+
+    const matching = listRes.body.items.filter((d) => d._id === draftId || d.title?.includes("Artisan Bread Special"));
+    expect(matching.length).toBe(1);
+
+    // 4. Delete the draft via /content/:id
+    const deleteRes = await request(app)
+      .delete(`/api/v1/content/${draftId}`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .set("X-Workspace-Id", workspace.id);
+
+    expect(deleteRes.status).toBe(204);
+
+    // 5. Verify the draft is completely gone and no phantom post reappears
+    const listAfterDelete = await request(app)
+      .get("/api/v1/content/drafts")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .set("X-Workspace-Id", workspace.id);
+
+    const ghost = listAfterDelete.body.items.find(
+      (d) => d._id === draftId || d.title?.includes("Artisan Bread Special") || d.body?.includes("sourdough")
+    );
+    expect(ghost).toBeUndefined();
   });
 });

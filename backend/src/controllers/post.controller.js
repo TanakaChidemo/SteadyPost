@@ -7,8 +7,9 @@ const postMetricsModel = require("../models/postMetrics.model");
 const businessProfileModel = require("../models/businessProfile.model");
 const contentAdaptationService = require("../services/contentAdaptation.service");
 const { enqueuePublishJob } = require("../queue");
+const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
 
-const ALLOWED_CHANNELS = ["twitter", "linkedin", "instagram", "facebook"];
+const ALLOWED_CHANNELS = ["twitter", "linkedin", "instagram", "facebook", "gbp", "google_business"];
 const MAX_IDEA_LENGTH = 5000;
 
 const createPostSchema = z.object({
@@ -48,6 +49,18 @@ async function create(req, res) {
     origin = "manual",
     aiMetadata = {},
   } = parsed.data;
+
+  if (socialAccountId) {
+    try {
+      await validateAccountWorkspaceOwnership({
+        socialAccountId,
+        workspaceId: req.workspaceId,
+        userId: req.user.id,
+      });
+    } catch (err) {
+      return res.status(err.status || 403).json({ error: err.message });
+    }
+  }
 
   const post = await postModel.create({
     workspaceId: req.workspaceId,
@@ -94,7 +107,20 @@ async function update(req, res) {
 
   const updates = {};
   if (req.body.channel) updates.channel = req.body.channel;
-  if (req.body.socialAccountId !== undefined) updates.socialAccountId = req.body.socialAccountId;
+  if (req.body.socialAccountId !== undefined) {
+    if (req.body.socialAccountId) {
+      try {
+        await validateAccountWorkspaceOwnership({
+          socialAccountId: req.body.socialAccountId,
+          workspaceId: req.workspaceId,
+          userId: req.user.id,
+        });
+      } catch (err) {
+        return res.status(err.status || 403).json({ error: err.message });
+      }
+    }
+    updates.socialAccountId = req.body.socialAccountId;
+  }
   if (req.body.campaignId !== undefined) updates.campaignId = req.body.campaignId;
   if (req.body.scheduledAt !== undefined) {
     updates.scheduledAt = req.body.scheduledAt ? new Date(req.body.scheduledAt) : null;
@@ -147,6 +173,18 @@ async function approve(req, res) {
     return res.status(404).json({ error: "Post not found" });
   }
 
+  if (post.socialAccountId) {
+    try {
+      await validateAccountWorkspaceOwnership({
+        socialAccountId: post.socialAccountId,
+        workspaceId: req.workspaceId,
+        userId: req.user.id,
+      });
+    } catch (err) {
+      return res.status(err.status || 403).json({ error: err.message });
+    }
+  }
+
   const targetStatus = post.scheduledAt ? "scheduled" : "approved";
   const updated = await postModel.updateById(post.id, { status: targetStatus });
 
@@ -156,6 +194,23 @@ async function approve(req, res) {
     action: "approve",
     comment: req.body.comment || "",
   });
+
+  if (post.scheduledAt) {
+    const delay = Math.max(0, new Date(post.scheduledAt).getTime() - Date.now());
+    await enqueuePublishJob(
+      {
+        postId: post.id,
+        platform: post.channel,
+        contentDraftId: post.id,
+        socialAccountId: post.socialAccountId || null,
+        workspaceId: req.workspaceId,
+        content: post.content?.body || "",
+        mediaUrls: post.content?.mediaUrls || [],
+        hashtags: post.content?.hashtags || [],
+      },
+      { delay }
+    );
+  }
 
   return res.json(updated);
 }
@@ -184,6 +239,18 @@ async function publishNow(req, res) {
     return res.status(404).json({ error: "Post not found" });
   }
 
+  if (post.socialAccountId) {
+    try {
+      await validateAccountWorkspaceOwnership({
+        socialAccountId: post.socialAccountId,
+        workspaceId: req.workspaceId,
+        userId: req.user.id,
+      });
+    } catch (err) {
+      return res.status(err.status || 403).json({ error: err.message });
+    }
+  }
+
   await postModel.updateById(post.id, { status: "scheduled" });
 
   await enqueuePublishJob(
@@ -192,8 +259,10 @@ async function publishNow(req, res) {
       platform: post.channel,
       contentDraftId: post.id,
       socialAccountId: post.socialAccountId || null,
+      workspaceId: req.workspaceId,
       content: post.content?.body || "",
       mediaUrls: post.content?.mediaUrls || [],
+      hashtags: post.content?.hashtags || [],
     },
     { delay: 0 }
   );
@@ -203,6 +272,88 @@ async function publishNow(req, res) {
     status: "publishing",
     platform: post.channel,
     title: post.content?.title,
+  });
+}
+
+const publishApprovedSchema = z.object({
+  postIds: z.array(z.string()).optional(),
+  campaignId: z.string().optional(),
+});
+
+async function publishApproved(req, res) {
+  const parsed = publishApprovedSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+
+  const { postIds, campaignId } = parsed.data;
+  let postsToPublish = [];
+
+  if (Array.isArray(postIds) && postIds.length > 0) {
+    const foundPosts = await Promise.all(postIds.map((id) => postModel.findById(id)));
+    postsToPublish = foundPosts.filter((p) => p && p.workspaceId === req.workspaceId && p.status === "approved");
+  } else {
+    const query = { status: "approved" };
+    if (campaignId) query.campaignId = campaignId;
+    postsToPublish = await postModel.findByWorkspaceId(req.workspaceId, query);
+  }
+
+  if (postsToPublish.length === 0) {
+    return res.status(200).json({
+      message: "No approved posts found to publish",
+      queuedCount: 0,
+      items: [],
+    });
+  }
+
+  const queuedItems = [];
+
+  for (const post of postsToPublish) {
+    if (post.socialAccountId) {
+      try {
+        await validateAccountWorkspaceOwnership({
+          socialAccountId: post.socialAccountId,
+          workspaceId: req.workspaceId,
+          userId: req.user.id,
+        });
+      } catch (err) {
+        return res.status(err.status || 403).json({
+          error: `Post ${post.id}: ${err.message}`,
+        });
+      }
+    }
+
+    const delay = post.scheduledAt ? Math.max(0, new Date(post.scheduledAt).getTime() - Date.now()) : 0;
+    await postModel.updateById(post.id, { status: delay > 0 ? "scheduled" : "publishing" });
+
+    await enqueuePublishJob(
+      {
+        postId: post.id,
+        platform: post.channel,
+        contentDraftId: post.id,
+        socialAccountId: post.socialAccountId || null,
+        workspaceId: req.workspaceId,
+        content: post.content?.body || "",
+        mediaUrls: post.content?.mediaUrls || [],
+        hashtags: post.content?.hashtags || [],
+      },
+      { delay }
+    );
+
+    queuedItems.push({
+      postId: post.id,
+      channel: post.channel,
+      title: post.content?.title,
+      status: delay > 0 ? "scheduled" : "publishing",
+      scheduledAt: post.scheduledAt || null,
+      delay,
+    });
+  }
+
+  return res.status(202).json({
+    message: `Queued ${queuedItems.length} approved post(s) for publishing`,
+    queuedCount: queuedItems.length,
+    items: queuedItems,
   });
 }
 
@@ -247,14 +398,22 @@ async function generateVariants(req, res) {
 
   const { idea, channels, tone, campaignId = null, sourcePostId = null, saveAsDrafts = false } = parsed.data;
 
-  const rawChannels = channels;
-  let targetChannels =
-    Array.isArray(rawChannels) && rawChannels.length > 0
-      ? [...new Set(rawChannels.map((c) => String(c).toLowerCase().trim()))].filter((c) =>
-          ALLOWED_CHANNELS.includes(c)
-        )
-      : ["instagram", "facebook"];
-  if (targetChannels.length === 0) targetChannels = ["instagram", "facebook"];
+  let targetChannels = ["instagram", "facebook"];
+  if (Array.isArray(channels)) {
+    if (channels.length === 0) {
+      return res.status(400).json({ error: "At least one target channel is required" });
+    }
+    const filtered = [...new Set(channels.map((c) => String(c).toLowerCase().trim()))].filter((c) =>
+      ALLOWED_CHANNELS.includes(c)
+    );
+    if (filtered.length === 0) {
+      return res.status(400).json({
+        error: "None of the requested channels are supported",
+        supportedChannels: ALLOWED_CHANNELS,
+      });
+    }
+    targetChannels = filtered;
+  }
 
   let effectiveTone = tone;
   let businessProfile = null;
@@ -316,34 +475,6 @@ async function generateVariants(req, res) {
       });
       createdDrafts.push(post);
       variant.post = post;
-
-      try {
-        await contentDraftModel.create({
-          ownerId: req.user.id,
-          title: variant.content.title,
-          body: variant.content.body,
-          platforms: [variant.channel],
-          mediaUrls: variant.content.mediaUrls || [],
-          status: "draft",
-          aiMetadata: {
-            provider: variant.provider,
-            model: variant.model,
-            tone: effectiveTone,
-            idea,
-            sourcePostId,
-            postId: post.id,
-          },
-          versions: [
-            {
-              body: variant.content.body,
-              editedAt: new Date(),
-              editedBy: req.user.id,
-            },
-          ],
-        });
-      } catch (err) {
-        // non-blocking
-      }
     }
     adaptationResult.savedDrafts = createdDrafts;
   }
@@ -427,34 +558,6 @@ async function repurposePost(req, res) {
       });
       createdDrafts.push(newPost);
       variant.post = newPost;
-
-      try {
-        await contentDraftModel.create({
-          ownerId: req.user.id,
-          title: variant.content.title,
-          body: variant.content.body,
-          platforms: [variant.channel],
-          mediaUrls: post.content?.mediaUrls || [],
-          status: "draft",
-          aiMetadata: {
-            provider: variant.provider,
-            model: variant.model,
-            tone: effectiveTone,
-            sourcePostId: post.id,
-            postId: newPost.id,
-            repurposed: true,
-          },
-          versions: [
-            {
-              body: variant.content.body,
-              editedAt: new Date(),
-              editedBy: req.user.id,
-            },
-          ],
-        });
-      } catch (err) {
-        // non-blocking
-      }
     }
     adaptationResult.savedDrafts = createdDrafts;
   }
@@ -498,17 +601,14 @@ async function batchCreate(req, res) {
 
   const itemsToInsert = parsed.data.posts.map((item) => ({
     workspaceId: req.workspaceId,
-    authorId: req.user.id,
+    ownerId: req.user.id,
     channel: item.channel,
-    campaignId: item.campaignId || null,
-    content: {
-      title: item.title || "Untitled Post",
-      body: item.body,
-      mediaUrls: item.mediaUrls || [],
-      hashtags: item.hashtags || [],
-    },
+    platforms: [item.channel],
+    title: item.title || `Post for ${item.channel}`,
+    body: item.body,
+    mediaUrls: item.mediaUrls || [],
+    hashtags: item.hashtags || [],
     status: "draft",
-    origin: "manual",
     aiMetadata: item.aiMetadata || {},
     versions: [
       {
@@ -519,32 +619,8 @@ async function batchCreate(req, res) {
     ],
   }));
 
-  const createdPosts = await postModel.createMany(itemsToInsert);
-
-  for (const item of itemsToInsert) {
-    try {
-      await contentDraftModel.create({
-        ownerId: req.user.id,
-        title: item.content.title || `Post for ${item.channel}`,
-        body: item.content.body,
-        platforms: [item.channel],
-        mediaUrls: item.content.mediaUrls || [],
-        status: "draft",
-        aiMetadata: item.aiMetadata || {},
-        versions: [
-          {
-            body: item.content.body,
-            editedAt: new Date(),
-            editedBy: req.user.id,
-          },
-        ],
-      });
-    } catch (err) {
-      // non-blocking
-    }
-  }
-
-  return res.status(201).json({ items: createdPosts });
+  const createdDrafts = await contentDraftModel.createMany(itemsToInsert);
+  return res.status(201).json({ items: createdDrafts });
 }
 
 module.exports = {
@@ -561,4 +637,5 @@ module.exports = {
   generateVariants,
   repurposePost,
   batchCreate,
+  publishApproved,
 };

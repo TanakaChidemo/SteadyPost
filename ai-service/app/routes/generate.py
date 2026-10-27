@@ -73,6 +73,8 @@ def variants():
 
     raw_channels = payload.get("channels")
     if isinstance(raw_channels, list):
+        if len(raw_channels) == 0:
+            return jsonify(error="At least one target channel is required"), 400
         seen = set()
         channels = []
         for ch in raw_channels:
@@ -81,10 +83,12 @@ def variants():
                 if c in ALLOWED_CHANNELS and c not in seen:
                     seen.add(c)
                     channels.append(c)
+        if not channels:
+            return jsonify(
+                error="None of the requested channels are supported",
+                supportedChannels=ALLOWED_CHANNELS,
+            ), 400
     else:
-        channels = ["instagram", "facebook"]
-
-    if not channels:
         channels = ["instagram", "facebook"]
 
     tone = payload.get("tone", "casual")

@@ -23,7 +23,7 @@ def _is_configured(key: str | None) -> bool:
 
 
 def _get_active_model_and_client():
-    """Return the first configured (client, model_name) tuple for secondary tasks."""
+    """Return the first configured (client, model_name, provider_name) tuple for secondary tasks."""
     groq_key = os.getenv("GROQ_API_KEY")
     if _is_configured(groq_key):
         try:
@@ -33,7 +33,7 @@ def _get_active_model_and_client():
                 base_url="https://api.groq.com/openai/v1",
                 timeout=12.0,
             )
-            return client, model
+            return client, model, "groq"
         except Exception:
             pass
 
@@ -41,12 +41,19 @@ def _get_active_model_and_client():
     if _is_configured(openrouter_key):
         try:
             model = os.getenv("OPENROUTER_MODEL", "openrouter/auto")
-            return OpenAI(
-                api_key=openrouter_key,
-                base_url="https://openrouter.ai/api/v1",
-                default_headers={"HTTP-Referer": "http://localhost:3000", "X-Title": "SteadyPost"},
-                timeout=12.0,
-            ), model
+            return (
+                OpenAI(
+                    api_key=openrouter_key,
+                    base_url="https://openrouter.ai/api/v1",
+                    default_headers={
+                        "HTTP-Referer": "http://localhost:3000",
+                        "X-Title": "SteadyPost",
+                    },
+                    timeout=12.0,
+                ),
+                model,
+                "openrouter",
+            )
         except Exception:
             pass
 
@@ -54,22 +61,26 @@ def _get_active_model_and_client():
     if _is_configured(gemini_key):
         try:
             model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
-            return OpenAI(
-                api_key=gemini_key,
-                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-                timeout=12.0,
-            ), model
+            return (
+                OpenAI(
+                    api_key=gemini_key,
+                    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                    timeout=12.0,
+                ),
+                model,
+                "gemini",
+            )
         except Exception:
             pass
 
     openai_key = os.getenv("OPENAI_API_KEY")
     if _is_configured(openai_key):
         try:
-            return OpenAI(api_key=openai_key, timeout=12.0), "gpt-4o-mini"
+            return OpenAI(api_key=openai_key, timeout=12.0), "gpt-4o-mini", "openai"
         except Exception:
             pass
 
-    return None, None
+    return None, None, None
 
 
 def _generate_with_groq(messages: list) -> dict:
@@ -407,6 +418,7 @@ def _generate_single_channel_variant(
     source_post: dict | None,
     client,
     model_name: str,
+    provider_name: str | None = None,
 ) -> dict:
     constraint = PLATFORM_CONSTRAINTS.get(ch, "concise and platform-native")
     title = f"{ch.capitalize()} Post: {idea[:30]}"
@@ -455,7 +467,7 @@ def _generate_single_channel_variant(
             "mediaUrls": [],
         },
         "tone": tone,
-        "provider": "groq" if is_ai else "template",
+        "provider": (provider_name or "ai") if is_ai else "template",
         "model": model_name if is_ai else "template-fallback",
     }
 
@@ -468,9 +480,7 @@ def generate_variants(
     source_post: dict | None = None,
 ) -> dict:
     allowed = ["twitter", "linkedin", "instagram", "facebook"]
-    if not channels:
-        channels = ["instagram", "facebook"]
-    else:
+    if channels is not None:
         seen = set()
         clean_channels = []
         for ch in channels:
@@ -479,10 +489,14 @@ def generate_variants(
                 if c in allowed and c not in seen:
                     seen.add(c)
                     clean_channels.append(c)
-        channels = clean_channels if clean_channels else ["instagram", "facebook"]
+        if not clean_channels:
+            raise ValueError("None of the requested channels are supported")
+        channels = clean_channels
+    else:
+        channels = ["instagram", "facebook"]
 
     idea = idea.strip()[:5000]
-    client, model_name = _get_active_model_and_client()
+    client, model_name, provider_name = _get_active_model_and_client()
 
     profile_context = ""
     if business_profile:
@@ -505,6 +519,7 @@ def generate_variants(
                 source_post,
                 client,
                 model_name,
+                provider_name,
             ): ch
             for ch in channels
         }
@@ -531,11 +546,11 @@ def generate_variants(
     ordered_variants = [
         variants_by_channel[ch] for ch in channels if ch in variants_by_channel
     ]
-    any_ai = any(v.get("provider") == "groq" for v in ordered_variants)
+    any_ai = any(v.get("provider") not in ("template", None) for v in ordered_variants)
     return {
         "idea": idea,
         "tone": tone,
         "variants": ordered_variants,
-        "provider": "groq" if any_ai else "template",
+        "provider": (provider_name or "ai") if any_ai else "template",
         "model": model_name if any_ai else "template-fallback",
     }

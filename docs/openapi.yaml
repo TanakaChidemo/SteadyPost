@@ -264,13 +264,51 @@ paths:
       responses:
         "201": { description: Created posts }
 
+  /posts/publish-approved:
+    post:
+      tags: [Posts]
+      summary: Publish all or selected approved posts across connected channels
+      description: >
+        Queues approved posts immediately or for their scheduledAt time via the job queue.
+        Validates that each post and associated social account belongs to the requester's workspace.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                postIds:
+                  type: array
+                  items: { type: string }
+                campaignId: { type: string }
+      responses:
+        "202": { description: Approved posts queued for publishing }
+        "403": { description: Social account does not belong to the requester's workspace }
+
   /publish/now:
     post:
       tags: [Publish]
-      summary: Publish a draft immediately
+      summary: Publish a draft immediately to one or multiple connected channels
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contentDraftId]
+              properties:
+                contentDraftId: { type: string }
+                platform: { type: string }
+                platforms: { type: array, items: { type: string } }
+                socialAccountId: { type: string }
+                socialAccountIds: { type: array, items: { type: string } }
       responses:
         "202": { description: Publish job accepted }
+        "403": { description: Social account does not belong to the requester's workspace }
+        "404": { description: Content draft or social account not found }
 
   /publish/status/{scheduledPostId}:
     get:

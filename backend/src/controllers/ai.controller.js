@@ -180,14 +180,17 @@ async function generateVariants(req, res) {
   }
   if (!effectiveTone) effectiveTone = "professional";
 
-  const result = await contentAdaptationService.adaptIdeaToChannels({
-    idea: contentIdea,
-    channels,
-    tone: effectiveTone,
-    businessProfile,
-  });
-
-  return res.json(result);
+  try {
+    const result = await contentAdaptationService.adaptIdeaToChannels({
+      idea: contentIdea,
+      channels,
+      tone: effectiveTone,
+      businessProfile,
+    });
+    return res.json(result);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message });
+  }
 }
 
 module.exports = { generateCaption, suggestHashtags, repurposeContent, generateVariants };

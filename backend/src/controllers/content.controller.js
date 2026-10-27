@@ -13,43 +13,7 @@ const draftSchema = z.object({
 
 async function list(req, res) {
   const drafts = await ContentDraft.find({ ownerId: req.user.id });
-  let postDrafts = [];
-  try {
-    if (req.workspaceId) {
-      postDrafts = await postModel.findByWorkspaceId(req.workspaceId, { status: "draft" });
-    } else {
-      postDrafts = await postModel.Post.find({ authorId: req.user.id, status: "draft" }).lean();
-    }
-  } catch (err) {
-    postDrafts = [];
-  }
-
-  const existingTitlesAndBodies = new Set(
-    drafts.map((d) => `${(d.title || "").trim()}:::${(d.body || "").trim()}`)
-  );
-
-  const extra = [];
-  for (const p of postDrafts) {
-    const key = `${(p.content?.title || "").trim()}:::${(p.content?.body || "").trim()}`;
-    if (!existingTitlesAndBodies.has(key)) {
-      existingTitlesAndBodies.add(key);
-      extra.push({
-        _id: p.id || p._id,
-        ownerId: p.authorId,
-        title: p.content?.title || `Draft for ${p.channel}`,
-        body: p.content?.body || "",
-        platforms: [p.channel],
-        mediaUrls: p.content?.mediaUrls || [],
-        status: "draft",
-        aiMetadata: p.aiMetadata || {},
-        updatedAt: p.updatedAt || new Date(),
-        createdAt: p.createdAt || new Date(),
-      });
-    }
-  }
-
-  const all = [...drafts, ...extra];
-  const sorted = all.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+  const sorted = [...drafts].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
   return res.json({ items: sorted.slice(0, 100) });
 }
 
@@ -118,8 +82,23 @@ async function remove(req, res) {
   if (!draftId) return res.status(400).json({ error: "Draft ID required" });
 
   const result = await ContentDraft.deleteOne({ _id: draftId, ownerId: req.user.id });
-  if (result.deletedCount === 0) return res.status(404).json({ error: "Draft not found" });
-  return res.status(204).send();
+  if (result.deletedCount > 0) {
+    return res.status(204).send();
+  }
+
+  // Gracefully handle legacy post_ ids
+  if (draftId.startsWith("post_")) {
+    try {
+      const postRes = await postModel.Post.deleteOne({ _id: draftId, authorId: req.user.id });
+      if (postRes.deletedCount > 0) {
+        return res.status(204).send();
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  return res.status(404).json({ error: "Draft not found" });
 }
 
 async function listVersions(req, res) {

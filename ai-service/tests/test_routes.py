@@ -46,3 +46,15 @@ def test_variants_success():
     assert len(data["variants"]) == 2
     assert data["variants"][0]["channel"] == "instagram"
     assert data["variants"][1]["channel"] == "facebook"
+
+
+def test_variants_unknown_channels_only():
+    app = create_app()
+    client = app.test_client()
+    res = client.post(
+        "/generate/variants",
+        json={"idea": "Testing unknown channel rejection", "channels": ["tiktok"]},
+    )
+    assert res.status_code == 400
+    data = res.get_json()
+    assert "error" in data

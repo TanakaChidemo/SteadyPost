@@ -5,77 +5,81 @@ import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
 import {
   SparklesIcon,
-  TwitterIcon,
   InstagramIcon,
-  LinkedInIcon,
   FacebookIcon,
   CheckIcon,
   RefreshIcon,
-  BarChartIcon,
   SpinnerIcon,
 } from "./Icons";
 
+// Only networks where publishing is currently supported
 const AVAILABLE_CHANNELS = [
-  { id: "twitter", label: "Twitter / X", icon: TwitterIcon, maxChars: 280, color: "text-sky-400 border-sky-500/40 bg-sky-500/10" },
-  { id: "linkedin", label: "LinkedIn", icon: LinkedInIcon, maxChars: 3000, color: "text-blue-400 border-blue-500/40 bg-blue-500/10" },
-  { id: "instagram", label: "Instagram", icon: InstagramIcon, maxChars: 2200, color: "text-pink-400 border-pink-500/40 bg-pink-500/10" },
-  { id: "facebook", label: "Facebook", icon: FacebookIcon, maxChars: 5000, color: "text-indigo-400 border-indigo-500/40 bg-indigo-500/10" },
+  {
+    id: "instagram",
+    label: "Instagram",
+    icon: InstagramIcon,
+    maxChars: 2200,
+    color: "text-pink-400 border-pink-500/40 bg-pink-500/10",
+  },
+  {
+    id: "facebook",
+    label: "Facebook",
+    icon: FacebookIcon,
+    maxChars: 5000,
+    color: "text-indigo-400 border-indigo-500/40 bg-indigo-500/10",
+  },
 ];
 
-const TONE_OPTIONS = [
-  { id: "professional", label: "Professional & Strategic" },
-  { id: "inspirational", label: "Inspirational & Bold" },
-  { id: "authoritative", label: "Authoritative & Insightful" },
-  { id: "playful", label: "Playful & Witty" },
-  { id: "educational", label: "Actionable & Educational" },
-  { id: "casual", label: "Casual & Conversational" },
+// Single unified tone list matching the Business Profile
+const UNIFIED_TONES = [
+  { id: "professional", label: "Professional" },
+  { id: "inspiring", label: "Inspiring" },
+  { id: "tech-forward", label: "Tech-Forward" },
+  { id: "casual", label: "Casual" },
+  { id: "authoritative", label: "Authoritative" },
+  { id: "bold", label: "Bold" },
+  { id: "playful", label: "Playful" },
 ];
 
 export function AIModal({ onInsert, initialContent, onDraftCreated }) {
   const { isAiModalOpen, setAiModalOpen, addToast } = useAppStore();
-  const [activeTab, setActiveTab] = useState("omnichannel"); // omnichannel | repurpose_top | caption | hashtags
+  const [activeTab, setActiveTab] = useState("write"); // write | repurpose | hashtags
 
-  // --- Tab 1: Omnichannel Adaptation State ---
-  const [omniIdea, setOmniIdea] = useState("");
-  const [omniChannels, setOmniChannels] = useState(["instagram", "facebook"]);
-  const [omniTone, setOmniTone] = useState("professional");
-  const [omniVariants, setOmniVariants] = useState([]);
-  const [activeOmniChannel, setActiveOmniChannel] = useState("instagram");
-  const [omniLoading, setOmniLoading] = useState(false);
-  const [savingOmniDrafts, setSavingOmniDrafts] = useState(false);
-  const [copiedChannel, setCopiedChannel] = useState(null);
+  // --- Tab 1: Write Posts State ---
+  const [writeIdea, setWriteIdea] = useState("");
+  const [writeChannels, setWriteChannels] = useState(["instagram", "facebook"]);
+  const [writeTone, setWriteTone] = useState("professional");
+  const [writeVariants, setWriteVariants] = useState([]);
+  const [activeWriteChannel, setActiveWriteChannel] = useState("instagram");
+  const [writeLoading, setWriteLoading] = useState(false);
+  const [savingVariantChannel, setSavingVariantChannel] = useState(null);
+  const [savedVariants, setSavedVariants] = useState({});
+  const [suggestingTagsChannel, setSuggestingTagsChannel] = useState(null);
 
-  // --- Tab 2: Repurpose Top Posts State ---
+  // --- Tab 2: Reuse a Past Post State ---
   const [topPosts, setTopPosts] = useState([]);
   const [loadingTopPosts, setLoadingTopPosts] = useState(false);
-  const [hasMetricsData, setHasMetricsData] = useState(false);
   const [selectedTopPost, setSelectedTopPost] = useState(null);
   const [repurposeChannels, setRepurposeChannels] = useState(["instagram", "facebook"]);
-  const [repurposeTone, setRepurposeTone] = useState("inspirational");
+  const [repurposeTone, setRepurposeTone] = useState("inspiring");
   const [repurposeVariants, setRepurposeVariants] = useState([]);
   const [activeRepurposeChannel, setActiveRepurposeChannel] = useState("instagram");
   const [repurposingLoading, setRepurposingLoading] = useState(false);
-  const [savingRepurposeDrafts, setSavingRepurposeDrafts] = useState(false);
+  const [savingRepurposeVariantChannel, setSavingRepurposeVariantChannel] = useState(null);
+  const [savedRepurposeVariants, setSavedRepurposeVariants] = useState({});
 
-  // --- Tab 3: Single Caption Generator State (Multi-Model) ---
-  const [topic, setTopic] = useState("");
-  const [platform, setPlatform] = useState("instagram");
-  const [tone, setTone] = useState("casual");
-  const [candidates, setCandidates] = useState([]);
-  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
-  const [captionLoading, setCaptionLoading] = useState(false);
-  const [copiedCaptionIdx, setCopiedCaptionIdx] = useState(null);
-
-  // --- Tab 4: Smart Hashtags State ---
+  // --- Tab 3: Hashtags State ---
   const [tagContent, setTagContent] = useState("");
   const [generatedTags, setGeneratedTags] = useState([]);
   const [tagLoading, setTagLoading] = useState(false);
 
+  // Shared copy state
+  const [copiedKey, setCopiedKey] = useState(null);
+
   // Initialize from initial editor content
   useEffect(() => {
     if (isAiModalOpen && initialContent) {
-      setOmniIdea(initialContent);
-      setTopic(initialContent);
+      setWriteIdea(initialContent);
       setTagContent(initialContent);
     }
   }, [isAiModalOpen, initialContent]);
@@ -83,19 +87,25 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
   // Load Business Profile tone default
   useEffect(() => {
     if (isAiModalOpen) {
-      api.businessProfile.get().then((profile) => {
-        if (profile?.tone?.length) {
-          const matchedTone = profile.tone[0].toLowerCase();
-          setOmniTone(matchedTone);
-          setRepurposeTone(matchedTone);
-        }
-      }).catch(() => {});
+      api.businessProfile
+        .get()
+        .then((profile) => {
+          if (profile?.tone?.length) {
+            const firstTone = String(profile.tone[0]).toLowerCase();
+            const match = UNIFIED_TONES.find((t) => t.id === firstTone);
+            if (match) {
+              setWriteTone(match.id);
+              setRepurposeTone(match.id);
+            }
+          }
+        })
+        .catch(() => {});
     }
   }, [isAiModalOpen]);
 
-  // Fetch top posts when switching to the repurpose tab
+  // Fetch top published posts when opening the repurpose tab
   useEffect(() => {
-    if (isAiModalOpen && activeTab === "repurpose_top") {
+    if (isAiModalOpen && activeTab === "repurpose") {
       loadTopPosts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,83 +116,33 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
     try {
       const res = await api.posts.getTopPerforming({ limit: 6 });
       setTopPosts(res.items || []);
-      setHasMetricsData(Boolean(res.hasMetrics));
       if (res.items?.length > 0 && !selectedTopPost) {
         setSelectedTopPost(res.items[0]);
       }
     } catch (err) {
-      addToast("error", err.message || "Failed to load top posts");
+      addToast("error", err.message || "Failed to load past posts");
     } finally {
       setLoadingTopPosts(false);
     }
   }
 
-  // --- Tab 1 Handlers: Omnichannel Adaptation ---
-  function toggleOmniChannel(id) {
-    if (omniChannels.includes(id)) {
-      if (omniChannels.length === 1) return addToast("info", "Select at least one channel");
-      const next = omniChannels.filter((c) => c !== id);
-      setOmniChannels(next);
-      if (activeOmniChannel === id) setActiveOmniChannel(next[0]);
+  // --- Channel Toggles ---
+  function toggleWriteChannel(id) {
+    if (writeChannels.includes(id)) {
+      if (writeChannels.length === 1) return addToast("info", "Select at least one network");
+      const next = writeChannels.filter((c) => c !== id);
+      setWriteChannels(next);
+      if (activeWriteChannel === id) setActiveWriteChannel(next[0]);
     } else {
-      const next = [...omniChannels, id];
-      setOmniChannels(next);
-      setActiveOmniChannel(id);
+      const next = [...writeChannels, id];
+      setWriteChannels(next);
+      setActiveWriteChannel(id);
     }
   }
 
-  async function handleGenerateOmniVariants() {
-    if (!omniIdea.trim()) return addToast("error", "Please enter an idea or message to adapt");
-    setOmniLoading(true);
-    try {
-      const res = await api.posts.generateVariants({
-        idea: omniIdea,
-        channels: omniChannels,
-        tone: omniTone,
-      });
-      setOmniVariants(res.variants || []);
-      if (res.variants?.length > 0) {
-        setActiveOmniChannel(res.variants[0].channel);
-      }
-      addToast("success", `Generated platform-native variants for ${res.variants?.length || 0} channels!`);
-    } catch (err) {
-      addToast("error", err.message || "Failed to generate channel variants");
-    } finally {
-      setOmniLoading(false);
-    }
-  }
-
-  async function handleSaveOmniAsDrafts() {
-    if (omniVariants.length === 0) return;
-    setSavingOmniDrafts(true);
-    try {
-      const postsToSave = omniVariants.map((v) => ({
-        channel: v.channel,
-        title: v.content?.title || `Post for ${v.channel}`,
-        body: v.content?.body || "",
-        hashtags: v.content?.hashtags || [],
-        aiMetadata: {
-          provider: v.provider,
-          model: v.model,
-          tone: omniTone,
-          idea: omniIdea,
-          source: "omnichannel_adaptation",
-        },
-      }));
-      await api.posts.batchCreate(postsToSave);
-      onDraftCreated?.();
-      addToast("success", `Saved all ${postsToSave.length} channel variants as drafts!`);
-    } catch (err) {
-      addToast("error", err.message || "Failed to save drafts");
-    } finally {
-      setSavingOmniDrafts(false);
-    }
-  }
-
-  // --- Tab 2 Handlers: Repurpose Top Posts ---
   function toggleRepurposeChannel(id) {
     if (repurposeChannels.includes(id)) {
-      if (repurposeChannels.length === 1) return addToast("info", "Select at least one channel");
+      if (repurposeChannels.length === 1) return addToast("info", "Select at least one network");
       const next = repurposeChannels.filter((c) => c !== id);
       setRepurposeChannels(next);
       if (activeRepurposeChannel === id) setActiveRepurposeChannel(next[0]);
@@ -193,9 +153,42 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
     }
   }
 
-  async function handleRepurposeSelectedPost() {
-    if (!selectedTopPost) return addToast("error", "Please select a top-performing post to repurpose");
+  // --- Generation Handlers ---
+  async function handleGeneratePosts() {
+    if (!writeIdea.trim()) {
+      return addToast("error", "Please enter an idea or message to write about");
+    }
+    setWriteLoading(true);
+    setSavedVariants({});
+    try {
+      const res = await api.posts.generateVariants({
+        idea: writeIdea,
+        channels: writeChannels,
+        tone: writeTone,
+      });
+      setWriteVariants(res.variants || []);
+      if (res.variants?.length > 0) {
+        setActiveWriteChannel(res.variants[0].channel);
+      }
+      addToast(
+        "success",
+        `Created posts for ${res.variants?.length || 0} ${
+          res.variants?.length === 1 ? "network" : "networks"
+        }!`
+      );
+    } catch (err) {
+      addToast("error", err.message || "Failed to generate posts");
+    } finally {
+      setWriteLoading(false);
+    }
+  }
+
+  async function handleRepurposePost() {
+    if (!selectedTopPost) {
+      return addToast("error", "Please select a past post to reuse");
+    }
     setRepurposingLoading(true);
+    setSavedRepurposeVariants({});
     try {
       const res = await api.posts.repurposePost(selectedTopPost.id, {
         targetChannels: repurposeChannels,
@@ -205,79 +198,32 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
       if (res.variants?.length > 0) {
         setActiveRepurposeChannel(res.variants[0].channel);
       }
-      addToast("success", `Repurposed into ${res.variants?.length || 0} platform-native posts!`);
+      addToast(
+        "success",
+        `Reused post for ${res.variants?.length || 0} ${
+          res.variants?.length === 1 ? "network" : "networks"
+        }!`
+      );
     } catch (err) {
-      addToast("error", err.message || "Failed to repurpose post");
+      addToast("error", err.message || "Failed to reuse post");
     } finally {
       setRepurposingLoading(false);
     }
   }
 
-  async function handleSaveRepurposedAsDrafts() {
-    if (repurposeVariants.length === 0) return;
-    setSavingRepurposeDrafts(true);
-    try {
-      const postsToSave = repurposeVariants.map((v) => ({
-        channel: v.channel,
-        title: v.content?.title || `Repurposed for ${v.channel}`,
-        body: v.content?.body || "",
-        hashtags: v.content?.hashtags || [],
-        aiMetadata: {
-          provider: v.provider,
-          model: v.model,
-          tone: repurposeTone,
-          sourcePostId: selectedTopPost?.id,
-          repurposed: true,
-        },
-      }));
-      await api.posts.batchCreate(postsToSave);
-      onDraftCreated?.();
-      addToast("success", `Saved ${postsToSave.length} repurposed variants as drafts!`);
-    } catch (err) {
-      addToast("error", err.message || "Failed to save drafts");
-    } finally {
-      setSavingRepurposeDrafts(false);
-    }
-  }
-
-  // --- Tab 3 Handlers: Single Caption Multi-Model ---
-  async function handleGenerateCaption() {
-    if (!topic.trim()) return addToast("error", "Please enter a topic or concept");
-    setCaptionLoading(true);
-    try {
-      const res = await api.ai.generateCaption({ topic, platform, tone });
-      const rawCandidates =
-        res.candidates && res.candidates.length > 0
-          ? res.candidates
-          : [
-              {
-                provider: "default",
-                label: "SteadyPost AI",
-                model: res.model || "standard",
-                caption: res.caption,
-                status: "success",
-                error: null,
-              },
-            ];
-      setCandidates(rawCandidates);
-      const firstSuccess = rawCandidates.findIndex((c) => c.status === "success" && c.caption);
-      setSelectedCandidateIndex(firstSuccess >= 0 ? firstSuccess : 0);
-      addToast("success", "Multi-model captions generated!");
-    } catch (err) {
-      addToast("error", err.message || "Caption generation failed");
-    } finally {
-      setCaptionLoading(false);
-    }
-  }
-
-  // --- Tab 4 Handlers: Hashtags ---
   async function handleGenerateHashtags() {
-    if (!tagContent.trim()) return addToast("error", "Please enter draft text to analyze");
+    if (!tagContent.trim()) {
+      return addToast("error", "Please enter draft text or keywords to analyze");
+    }
     setTagLoading(true);
     try {
-      const res = await api.ai.suggestHashtags({ content: tagContent, platform: "instagram", maxTags: 10 });
+      const res = await api.ai.suggestHashtags({
+        content: tagContent,
+        platform: "instagram",
+        maxTags: 10,
+      });
       setGeneratedTags(res.hashtags || []);
-      addToast("success", "Smart hashtags generated!");
+      addToast("success", "Hashtags suggested!");
     } catch (err) {
       addToast("error", err.message || "Hashtags generation failed");
     } finally {
@@ -285,17 +231,123 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
     }
   }
 
-  // Shared Actions
+  // --- Inline Hashtag Suggestion for Generated Variants ---
+  async function handleSuggestHashtagsForVariant(variant, isRepurpose = false) {
+    try {
+      setSuggestingTagsChannel(variant.channel);
+      const res = await api.ai.suggestHashtags({
+        content: variant.content?.body || "",
+        platform: variant.channel,
+        maxTags: 5,
+      });
+      if (res.hashtags && res.hashtags.length > 0) {
+        const tagsStr = res.hashtags.join(" ");
+        const currentBody = variant.content?.body || "";
+        const updatedBody = currentBody.includes(res.hashtags[0])
+          ? currentBody
+          : currentBody
+          ? `${currentBody}\n\n${tagsStr}`
+          : tagsStr;
+
+        if (isRepurpose) {
+          setRepurposeVariants((prev) =>
+            prev.map((v) =>
+              v.channel === variant.channel
+                ? {
+                    ...v,
+                    content: { ...v.content, body: updatedBody },
+                    charCount: updatedBody.length,
+                  }
+                : v
+            )
+          );
+        } else {
+          setWriteVariants((prev) =>
+            prev.map((v) =>
+              v.channel === variant.channel
+                ? {
+                    ...v,
+                    content: { ...v.content, body: updatedBody },
+                    charCount: updatedBody.length,
+                  }
+                : v
+            )
+          );
+        }
+        addToast("success", `Added ${res.hashtags.length} hashtags!`);
+      } else {
+        addToast("info", "No hashtags found");
+      }
+    } catch (err) {
+      addToast("error", err.message || "Could not generate hashtags");
+    } finally {
+      setSuggestingTagsChannel(null);
+    }
+  }
+
+  // --- Save Individual Draft ---
+  async function handleSaveVariantDraft(variant) {
+    setSavingVariantChannel(variant.channel);
+    try {
+      await api.posts.batchCreate([
+        {
+          channel: variant.channel,
+          title: variant.content?.title || `Post for ${variant.channel}`,
+          body: variant.content?.body || "",
+          hashtags: variant.content?.hashtags || [],
+          aiMetadata: {
+            provider: variant.provider,
+            model: variant.model,
+            tone: writeTone,
+            idea: writeIdea,
+            source: "ai_write",
+          },
+        },
+      ]);
+      setSavedVariants((prev) => ({ ...prev, [variant.channel]: true }));
+      onDraftCreated?.();
+      addToast("success", `Saved ${variant.channel} post as draft!`);
+    } catch (err) {
+      addToast("error", err.message || "Failed to save draft");
+    } finally {
+      setSavingVariantChannel(null);
+    }
+  }
+
+  async function handleSaveRepurposeVariantDraft(variant) {
+    setSavingRepurposeVariantChannel(variant.channel);
+    try {
+      await api.posts.batchCreate([
+        {
+          channel: variant.channel,
+          title: variant.content?.title || `Repurposed for ${variant.channel}`,
+          body: variant.content?.body || "",
+          hashtags: variant.content?.hashtags || [],
+          aiMetadata: {
+            provider: variant.provider,
+            model: variant.model,
+            tone: repurposeTone,
+            sourcePostId: selectedTopPost?.id,
+            repurposed: true,
+          },
+        },
+      ]);
+      setSavedRepurposeVariants((prev) => ({ ...prev, [variant.channel]: true }));
+      onDraftCreated?.();
+      addToast("success", `Saved ${variant.channel} post as draft!`);
+    } catch (err) {
+      addToast("error", err.message || "Failed to save draft");
+    } finally {
+      setSavingRepurposeVariantChannel(null);
+    }
+  }
+
+  // --- Shared Actions ---
   function copyText(text, key) {
     if (!text) return;
     navigator.clipboard.writeText(text);
-    if (key === "caption") {
-      setCopiedCaptionIdx(selectedCandidateIndex);
-      setTimeout(() => setCopiedCaptionIdx(null), 2000);
-    } else {
-      setCopiedChannel(key);
-      setTimeout(() => setCopiedChannel(null), 2000);
-    }
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
     addToast("info", "Copied to clipboard!");
   }
 
@@ -307,15 +359,18 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
 
   if (!isAiModalOpen) return null;
 
-  const currentOmniVariant = omniVariants.find((v) => v.channel === activeOmniChannel);
-  const currentRepurposeVariant = repurposeVariants.find((v) => v.channel === activeRepurposeChannel);
+  const currentWriteVariant = writeVariants.find((v) => v.channel === activeWriteChannel);
+  const currentRepurposeVariant = repurposeVariants.find(
+    (v) => v.channel === activeRepurposeChannel
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm">
-      <div className="relative w-full max-w-5xl p-6 rounded-xl bg-slate-900 border border-slate-800 max-h-[92vh] overflow-y-auto shadow-2xl">
+      <div className="relative w-full max-w-4xl p-6 rounded-xl bg-slate-900 border border-slate-800 max-h-[92vh] overflow-y-auto shadow-2xl">
         <button
           onClick={() => setAiModalOpen(false)}
           className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg p-1"
+          aria-label="Close"
         >
           ✕
         </button>
@@ -326,53 +381,37 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
             <SparklesIcon className="w-5 h-5 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-white tracking-tight">AI Content & Repurposing Engine</h2>
-              <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Core v2
-              </span>
-            </div>
+            <h2 className="text-lg font-bold text-white tracking-tight">Write with AI</h2>
             <p className="text-xs text-slate-400">
-              Adapt 1 idea into platform-native variants or repurpose your top-performing posts across channels.
+              Turn an idea into platform-ready posts or reuse your past content.
             </p>
           </div>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-lg bg-slate-950 border border-slate-800 mb-6">
+        <div className="grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-slate-950 border border-slate-800 mb-6">
           <button
-            onClick={() => setActiveTab("omnichannel")}
+            onClick={() => setActiveTab("write")}
             className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
-              activeTab === "omnichannel"
+              activeTab === "write"
                 ? "bg-indigo-600 text-white shadow"
                 : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            <SparklesIcon className="w-3.5 h-3.5 text-indigo-300" />
-            <span>Omnichannel Adapt</span>
+            <SparklesIcon className="w-3.5 h-3.5" />
+            <span>Write posts</span>
           </button>
 
           <button
-            onClick={() => setActiveTab("repurpose_top")}
+            onClick={() => setActiveTab("repurpose")}
             className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
-              activeTab === "repurpose_top"
+              activeTab === "repurpose"
                 ? "bg-indigo-600 text-white shadow"
                 : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            <BarChartIcon className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Repurpose Top Posts</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("caption")}
-            className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
-              activeTab === "caption"
-                ? "bg-indigo-600 text-white shadow"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
-            }`}
-          >
-            <span>Multi-Model AI</span>
+            <RefreshIcon className="w-3.5 h-3.5" />
+            <span>Reuse a past post</span>
           </button>
 
           <button
@@ -388,28 +427,31 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
         </div>
 
         {/* ========================================================= */}
-        {/* TAB 1: OMNICHANNEL ADAPTATION (CORE GENERATION LOOP #05) */}
+        {/* TAB 1: WRITE POSTS                                        */}
         {/* ========================================================= */}
-        {activeTab === "omnichannel" && (
+        {activeTab === "write" && (
           <div className="space-y-5">
             {/* Input Box */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-semibold text-slate-300">
-                  Core Idea, Announcement, or Draft Thought
+                  What would you like to post about?
                 </label>
-                <span className="text-[11px] text-slate-500">1 idea becomes 4 platform-native posts</span>
+                <span className="text-[11px] text-slate-500">
+                  1 idea becomes {writeChannels.length} platform-native{" "}
+                  {writeChannels.length === 1 ? "post" : "posts"}
+                </span>
               </div>
               <textarea
                 rows={3}
-                value={omniIdea}
-                onChange={(e) => setOmniIdea(e.target.value)}
-                placeholder="e.g. Fresh sourdough baked every morning with locally sourced grains, available starting this Friday at our downtown bakery..."
+                value={writeIdea}
+                onChange={(e) => setWriteIdea(e.target.value)}
+                placeholder="e.g. Fresh sourdough baked every morning with locally sourced organic grains, warm out of the oven every Friday at 7 AM at our downtown bakery..."
                 className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 leading-relaxed font-sans"
               />
             </div>
 
-            {/* Channel Selection & Tone */}
+            {/* Target Networks & Tone */}
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
               <div className="sm:col-span-7 space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
@@ -417,13 +459,13 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {AVAILABLE_CHANNELS.map((ch) => {
-                    const isSelected = omniChannels.includes(ch.id);
+                    const isSelected = writeChannels.includes(ch.id);
                     const Icon = ch.icon;
                     return (
                       <button
                         key={ch.id}
                         type="button"
-                        onClick={() => toggleOmniChannel(ch.id)}
+                        onClick={() => toggleWriteChannel(ch.id)}
                         className={`flex items-center gap-2 p-2.5 rounded-md border text-xs font-semibold transition ${
                           isSelected
                             ? ch.color
@@ -441,154 +483,172 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
 
               <div className="sm:col-span-5 space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                  Editorial Tone
+                  Tone
                 </label>
                 <select
-                  value={omniTone}
-                  onChange={(e) => setOmniTone(e.target.value)}
+                  value={writeTone}
+                  onChange={(e) => setWriteTone(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-xs font-medium text-white focus:outline-none focus:border-indigo-500"
                 >
-                  {TONE_OPTIONS.map((t) => (
+                  {UNIFIED_TONES.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.label}
                     </option>
                   ))}
                 </select>
                 <p className="text-[11px] text-slate-500 leading-tight">
-                  Auto-tuned with your workspace business profile and platform norms.
+                  Defaults to your business profile tone.
                 </p>
               </div>
             </div>
 
             {/* Generate Action Button */}
             <button
-              onClick={handleGenerateOmniVariants}
-              disabled={omniLoading}
+              onClick={handleGeneratePosts}
+              disabled={writeLoading}
               className="w-full py-3 rounded-md gradient-brand text-white text-xs font-bold hover:opacity-95 transition flex items-center justify-center gap-2 shadow-lg disabled:opacity-60"
             >
-              {omniLoading ? (
+              {writeLoading ? (
                 <>
                   <SpinnerIcon className="w-4 h-4 animate-spin" />
-                  <span>Generating Platform-Native Variants…</span>
+                  <span>Writing posts…</span>
                 </>
               ) : (
                 <>
                   <SparklesIcon className="w-4 h-4" />
-                  <span>Generate Platform Variants ({omniChannels.length} Channels)</span>
+                  <span>
+                    Generate Posts ({writeChannels.length}{" "}
+                    {writeChannels.length === 1 ? "Network" : "Networks"})
+                  </span>
                 </>
               )}
             </button>
 
             {/* Generated Channel Variants View */}
-            {omniVariants.length > 0 && (
+            {writeVariants.length > 0 && (
               <div className="mt-6 space-y-4 pt-4 border-t border-slate-800">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  {/* Channel Switcher */}
-                  <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800">
-                    {omniVariants.map((v) => {
-                      const spec = AVAILABLE_CHANNELS.find((c) => c.id === v.channel);
-                      const Icon = spec?.icon || SparklesIcon;
-                      const isActive = activeOmniChannel === v.channel;
-                      return (
-                        <button
-                          key={v.channel}
-                          onClick={() => setActiveOmniChannel(v.channel)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition ${
-                            isActive
-                              ? "bg-indigo-600 text-white shadow-sm"
-                              : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
-                          }`}
-                        >
-                          <Icon className="w-3.5 h-3.5" />
-                          <span className="capitalize">{v.channel}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Batch Actions */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleSaveOmniAsDrafts}
-                      disabled={savingOmniDrafts}
-                      className="px-3.5 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition flex items-center gap-1.5"
-                    >
-                      {savingOmniDrafts ? <SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> : <CheckIcon className="w-3.5 h-3.5 text-emerald-400" />}
-                      <span>Save All as Drafts</span>
-                    </button>
-                  </div>
+                {/* Channel Switcher */}
+                <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800">
+                  {writeVariants.map((v) => {
+                    const spec = AVAILABLE_CHANNELS.find((c) => c.id === v.channel);
+                    const Icon = spec?.icon || SparklesIcon;
+                    const isActive = activeWriteChannel === v.channel;
+                    return (
+                      <button
+                        key={v.channel}
+                        onClick={() => setActiveWriteChannel(v.channel)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition ${
+                          isActive
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span className="capitalize">{v.channel}</span>
+                        {savedVariants[v.channel] && (
+                          <span className="text-[10px] text-emerald-300 font-normal">✓</span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {/* Active Channel Variant Card */}
-                {currentOmniVariant && (
+                {currentWriteVariant && (
                   <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3.5 shadow-inner">
                     <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-white capitalize flex items-center gap-1.5">
-                          {currentOmniVariant.channel} Native Adaptation
+                          {currentWriteVariant.channel} Post
                         </span>
-                        <span
-                          className={`text-[10px] px-2 py-0.5 rounded border font-medium ${
-                            currentOmniVariant.provider === "groq"
-                              ? "bg-indigo-950/70 text-indigo-300 border-indigo-700/60"
-                              : "bg-amber-950/40 text-amber-300 border-amber-800/60"
-                          }`}
-                        >
-                          {currentOmniVariant.provider === "groq"
-                            ? `Groq (${currentOmniVariant.model || "LLM"})`
-                            : "Fallback Template (AI Unavailable)"}
-                        </span>
+                        {currentWriteVariant.provider === "template" && (
+                          <span className="text-[10px] px-2 py-0.5 rounded border font-medium bg-amber-950/40 text-amber-300 border-amber-800/60">
+                            Fallback Template
+                          </span>
+                        )}
                       </div>
 
-                      {/* Character Count Pill with Platform Limits */}
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`text-xs font-mono font-medium ${
-                            currentOmniVariant.charCount > currentOmniVariant.maxChars
-                              ? "text-rose-400"
-                              : "text-emerald-400"
-                          }`}
-                        >
-                          {currentOmniVariant.charCount} / {currentOmniVariant.maxChars} chars
-                        </span>
-                      </div>
+                      {/* Character Count shown only when close to limit */}
+                      {currentWriteVariant.charCount > currentWriteVariant.maxChars * 0.85 && (
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-xs font-mono font-medium ${
+                              currentWriteVariant.charCount > currentWriteVariant.maxChars
+                                ? "text-rose-400"
+                                : "text-amber-400"
+                            }`}
+                          >
+                            {currentWriteVariant.charCount} / {currentWriteVariant.maxChars} chars
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Formatted Copy Preview */}
                     <div className="p-3.5 rounded bg-slate-900/60 border border-slate-800 text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
-                      {currentOmniVariant.content.body}
+                      {currentWriteVariant.content.body}
                     </div>
 
-                    {/* Hashtags Chips */}
-                    {currentOmniVariant.content.hashtags?.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] text-slate-500 font-semibold mr-1">Tags:</span>
-                        {currentOmniVariant.content.hashtags.map((tag, i) => (
-                          <span
-                            key={i}
-                            className="px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800/60 text-indigo-300 text-[11px] font-mono"
-                          >
-                            {tag}
-                          </span>
-                        ))}
+                    {/* Actions: Hashtags, Copy, Use in editor, Save as Draft */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800/60">
+                      <button
+                        onClick={() => handleSuggestHashtagsForVariant(currentWriteVariant, false)}
+                        disabled={suggestingTagsChannel === currentWriteVariant.channel}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
+                      >
+                        {suggestingTagsChannel === currentWriteVariant.channel ? (
+                          <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <span>#</span>
+                        )}
+                        <span>Suggest Hashtags</span>
+                      </button>
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
+                        <button
+                          onClick={() =>
+                            copyText(
+                              currentWriteVariant.content.body,
+                              `write_${currentWriteVariant.channel}`
+                            )
+                          }
+                          className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
+                        >
+                          {copiedKey === `write_${currentWriteVariant.channel}`
+                            ? "Copied!"
+                            : "Copy"}
+                        </button>
+
+                        <button
+                          onClick={() => applyToEditor(currentWriteVariant.content.body)}
+                          className="px-3.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold transition"
+                        >
+                          Use in editor
+                        </button>
+
+                        <button
+                          onClick={() => handleSaveVariantDraft(currentWriteVariant)}
+                          disabled={
+                            savingVariantChannel === currentWriteVariant.channel ||
+                            savedVariants[currentWriteVariant.channel]
+                          }
+                          className="px-3.5 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow disabled:opacity-60 flex items-center gap-1.5"
+                        >
+                          {savingVariantChannel === currentWriteVariant.channel ? (
+                            <>
+                              <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                              <span>Saving…</span>
+                            </>
+                          ) : savedVariants[currentWriteVariant.channel] ? (
+                            <>
+                              <CheckIcon className="w-3.5 h-3.5 text-emerald-300" />
+                              <span>Saved</span>
+                            </>
+                          ) : (
+                            <span>Save as Draft</span>
+                          )}
+                        </button>
                       </div>
-                    )}
-
-                    {/* Variant Action Buttons */}
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800/60">
-                      <button
-                        onClick={() => copyText(currentOmniVariant.content.body, currentOmniVariant.channel)}
-                        className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
-                      >
-                        {copiedChannel === currentOmniVariant.channel ? "Copied!" : "Copy Copy"}
-                      </button>
-
-                      <button
-                        onClick={() => applyToEditor(currentOmniVariant.content.body)}
-                        className="px-4 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow"
-                      >
-                        Insert into Editor
-                      </button>
                     </div>
                   </div>
                 )}
@@ -598,43 +658,52 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
         )}
 
         {/* ========================================================= */}
-        {/* TAB 2: REPURPOSE TOP POSTS (POSTMETRICS READ PATH #19)     */}
+        {/* TAB 2: REUSE A PAST POST                                  */}
         {/* ========================================================= */}
-        {activeTab === "repurpose_top" && (
+        {activeTab === "repurpose" && (
           <div className="space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                  Select a Past High-Performing Post
+                  Select a Past Published Post
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  {hasMetricsData
-                    ? "Ranked by composite engagement score (likes, comments, shares, clicks, reach)."
-                    : "Showing recent workspace posts. Repurposing works instantly with or without recorded metrics."}
+                  Select a past post to adapt into fresh updates for your networks.
                 </p>
               </div>
 
-              <button
-                onClick={loadTopPosts}
-                disabled={loadingTopPosts}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 self-start sm:self-auto"
-              >
-                <RefreshIcon className={`w-3.5 h-3.5 ${loadingTopPosts ? "animate-spin" : ""}`} />
-                <span>Refresh Posts</span>
-              </button>
+              {topPosts.length > 0 && (
+                <button
+                  onClick={loadTopPosts}
+                  disabled={loadingTopPosts}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 self-start sm:self-auto"
+                >
+                  <RefreshIcon
+                    className={`w-3.5 h-3.5 ${loadingTopPosts ? "animate-spin" : ""}`}
+                  />
+                  <span>Refresh</span>
+                </button>
+              )}
             </div>
 
             {loadingTopPosts ? (
               <div className="py-12 flex flex-col items-center justify-center text-slate-500 text-xs gap-2">
                 <SpinnerIcon className="w-5 h-5 animate-spin text-indigo-500" />
-                <span>Scanning workspace post history and metrics…</span>
+                <span>Checking published posts…</span>
               </div>
             ) : topPosts.length === 0 ? (
-              <div className="p-8 rounded-lg bg-slate-950 border border-slate-800 text-center space-y-2">
-                <p className="text-xs text-slate-400 font-medium">No posts found in this workspace yet.</p>
-                <p className="text-[11px] text-slate-600">
-                  Write or publish posts in Content Studio to unlock post repurposing!
+              <div className="p-8 rounded-lg bg-slate-950 border border-slate-800 text-center space-y-3">
+                <p className="text-xs text-slate-300 font-medium">No published posts yet.</p>
+                <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+                  Once you publish posts to Instagram or Facebook, your top-performing content
+                  will appear here so you can easily turn winning posts into fresh updates.
                 </p>
+                <button
+                  onClick={() => setActiveTab("write")}
+                  className="mt-2 px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
+                >
+                  Write a new post instead
+                </button>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
@@ -668,17 +737,15 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                         </p>
                       </div>
 
-                      {/* Performance Metric Badges */}
                       <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[10px] text-slate-400">
                         {post.metrics?.hasMetrics ? (
                           <div className="flex items-center gap-2.5 font-mono">
                             <span>❤️ {post.metrics.likes}</span>
                             <span>💬 {post.metrics.comments}</span>
                             <span>🔁 {post.metrics.shares}</span>
-                            <span>👥 {post.metrics.reach}</span>
                           </div>
                         ) : (
-                          <span className="text-slate-500 italic">Recent Workspace Post</span>
+                          <span className="text-slate-500">Published Post</span>
                         )}
                         {isSelected && <span className="text-indigo-400 font-bold">Selected ✓</span>}
                       </div>
@@ -689,11 +756,11 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
             )}
 
             {/* Repurposing Target Configuration */}
-            {selectedTopPost && (
+            {selectedTopPost && topPosts.length > 0 && (
               <div className="p-4 rounded-lg bg-slate-950/70 border border-slate-800 space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-200">
-                    Repurpose Selected Post Across Target Channels
+                    Reuse Selected Post for Other Networks
                   </span>
                   <span className="text-[11px] text-indigo-400">
                     Source: {selectedTopPost.channel.toUpperCase()}
@@ -702,8 +769,10 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
 
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
                   <div className="sm:col-span-8 space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-400">Target Channels</label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <label className="block text-xs font-semibold text-slate-400">
+                      Target Networks
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
                       {AVAILABLE_CHANNELS.map((ch) => {
                         const isSelected = repurposeChannels.includes(ch.id);
                         const Icon = ch.icon;
@@ -712,14 +781,14 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                             key={ch.id}
                             type="button"
                             onClick={() => toggleRepurposeChannel(ch.id)}
-                            className={`flex items-center gap-1.5 p-2 rounded border text-xs font-semibold transition ${
+                            className={`flex items-center gap-2 p-2 rounded border text-xs font-semibold transition ${
                               isSelected
                                 ? ch.color
                                 : "border-slate-800 bg-slate-900 text-slate-500 hover:text-slate-300"
                             }`}
                           >
                             <Icon className="w-3.5 h-3.5 shrink-0" />
-                            <span className="capitalize">{ch.id}</span>
+                            <span className="capitalize">{ch.label}</span>
                             {isSelected && <CheckIcon className="w-3 h-3 ml-auto" />}
                           </button>
                         );
@@ -734,7 +803,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                       onChange={(e) => setRepurposeTone(e.target.value)}
                       className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
                     >
-                      {TONE_OPTIONS.map((t) => (
+                      {UNIFIED_TONES.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.label}
                         </option>
@@ -744,19 +813,22 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                 </div>
 
                 <button
-                  onClick={handleRepurposeSelectedPost}
+                  onClick={handleRepurposePost}
                   disabled={repurposingLoading}
                   className="w-full py-2.5 rounded-md gradient-brand text-white text-xs font-bold hover:opacity-95 transition flex items-center justify-center gap-2 shadow"
                 >
                   {repurposingLoading ? (
                     <>
                       <SpinnerIcon className="w-4 h-4 animate-spin" />
-                      <span>Adapting Top Post into Channels…</span>
+                      <span>Adapting past post…</span>
                     </>
                   ) : (
                     <>
                       <SparklesIcon className="w-4 h-4" />
-                      <span>Repurpose Top Post for {repurposeChannels.length} Channels</span>
+                      <span>
+                        Reuse Post for {repurposeChannels.length}{" "}
+                        {repurposeChannels.length === 1 ? "Network" : "Networks"}
+                      </span>
                     </>
                   )}
                 </button>
@@ -766,37 +838,29 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
             {/* Repurposed Variants Preview */}
             {repurposeVariants.length > 0 && (
               <div className="mt-4 space-y-4 pt-4 border-t border-slate-800">
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800">
-                    {repurposeVariants.map((v) => {
-                      const spec = AVAILABLE_CHANNELS.find((c) => c.id === v.channel);
-                      const Icon = spec?.icon || SparklesIcon;
-                      const isActive = activeRepurposeChannel === v.channel;
-                      return (
-                        <button
-                          key={v.channel}
-                          onClick={() => setActiveRepurposeChannel(v.channel)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition ${
-                            isActive
-                              ? "bg-indigo-600 text-white shadow-sm"
-                              : "text-slate-400 hover:text-slate-200"
-                          }`}
-                        >
-                          <Icon className="w-3.5 h-3.5" />
-                          <span className="capitalize">{v.channel}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <button
-                    onClick={handleSaveRepurposedAsDrafts}
-                    disabled={savingRepurposeDrafts}
-                    className="px-3.5 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition flex items-center gap-1.5"
-                  >
-                    {savingRepurposeDrafts ? <SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> : <CheckIcon className="w-3.5 h-3.5 text-emerald-400" />}
-                    <span>Save All as Drafts</span>
-                  </button>
+                <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800">
+                  {repurposeVariants.map((v) => {
+                    const spec = AVAILABLE_CHANNELS.find((c) => c.id === v.channel);
+                    const Icon = spec?.icon || SparklesIcon;
+                    const isActive = activeRepurposeChannel === v.channel;
+                    return (
+                      <button
+                        key={v.channel}
+                        onClick={() => setActiveRepurposeChannel(v.channel)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition ${
+                          isActive
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span className="capitalize">{v.channel}</span>
+                        {savedRepurposeVariants[v.channel] && (
+                          <span className="text-[10px] text-emerald-300 font-normal">✓</span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {currentRepurposeVariant && (
@@ -804,49 +868,97 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                     <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-white capitalize flex items-center gap-1.5">
-                          {currentRepurposeVariant.channel} Adapted Copy
+                          {currentRepurposeVariant.channel} Post
                         </span>
+                        {currentRepurposeVariant.provider === "template" && (
+                          <span className="text-[10px] px-2 py-0.5 rounded border font-medium bg-amber-950/40 text-amber-300 border-amber-800/60">
+                            Fallback Template
+                          </span>
+                        )}
+                      </div>
+
+                      {currentRepurposeVariant.charCount >
+                        currentRepurposeVariant.maxChars * 0.85 && (
                         <span
-                          className={`text-[10px] px-2 py-0.5 rounded border font-medium ${
-                            currentRepurposeVariant.provider === "groq"
-                              ? "bg-indigo-950/70 text-indigo-300 border-indigo-700/60"
-                              : "bg-amber-950/40 text-amber-300 border-amber-800/60"
+                          className={`text-xs font-mono font-medium ${
+                            currentRepurposeVariant.charCount > currentRepurposeVariant.maxChars
+                              ? "text-rose-400"
+                              : "text-amber-400"
                           }`}
                         >
-                          {currentRepurposeVariant.provider === "groq"
-                            ? `Groq (${currentRepurposeVariant.model || "LLM"})`
-                            : "Fallback Template (AI Unavailable)"}
+                          {currentRepurposeVariant.charCount} / {currentRepurposeVariant.maxChars}{" "}
+                          chars
                         </span>
-                      </div>
-                      <span
-                        className={`text-xs font-mono font-medium ${
-                          currentRepurposeVariant.charCount > currentRepurposeVariant.maxChars
-                            ? "text-rose-400"
-                            : "text-emerald-400"
-                        }`}
-                      >
-                        {currentRepurposeVariant.charCount} / {currentRepurposeVariant.maxChars} chars
-                      </span>
+                      )}
                     </div>
 
                     <div className="p-3.5 rounded bg-slate-900/60 border border-slate-800 text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
                       {currentRepurposeVariant.content.body}
                     </div>
 
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800/60">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800/60">
                       <button
-                        onClick={() => copyText(currentRepurposeVariant.content.body, currentRepurposeVariant.channel)}
-                        className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
+                        onClick={() =>
+                          handleSuggestHashtagsForVariant(currentRepurposeVariant, true)
+                        }
+                        disabled={suggestingTagsChannel === currentRepurposeVariant.channel}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
                       >
-                        {copiedChannel === currentRepurposeVariant.channel ? "Copied!" : "Copy"}
+                        {suggestingTagsChannel === currentRepurposeVariant.channel ? (
+                          <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <span>#</span>
+                        )}
+                        <span>Suggest Hashtags</span>
                       </button>
 
-                      <button
-                        onClick={() => applyToEditor(currentRepurposeVariant.content.body)}
-                        className="px-4 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow"
-                      >
-                        Insert into Editor
-                      </button>
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
+                        <button
+                          onClick={() =>
+                            copyText(
+                              currentRepurposeVariant.content.body,
+                              `repurpose_${currentRepurposeVariant.channel}`
+                            )
+                          }
+                          className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
+                        >
+                          {copiedKey === `repurpose_${currentRepurposeVariant.channel}`
+                            ? "Copied!"
+                            : "Copy"}
+                        </button>
+
+                        <button
+                          onClick={() => applyToEditor(currentRepurposeVariant.content.body)}
+                          className="px-3.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold transition"
+                        >
+                          Use in editor
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            handleSaveRepurposeVariantDraft(currentRepurposeVariant)
+                          }
+                          disabled={
+                            savingRepurposeVariantChannel === currentRepurposeVariant.channel ||
+                            savedRepurposeVariants[currentRepurposeVariant.channel]
+                          }
+                          className="px-3.5 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow disabled:opacity-60 flex items-center gap-1.5"
+                        >
+                          {savingRepurposeVariantChannel === currentRepurposeVariant.channel ? (
+                            <>
+                              <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                              <span>Saving…</span>
+                            </>
+                          ) : savedRepurposeVariants[currentRepurposeVariant.channel] ? (
+                            <>
+                              <CheckIcon className="w-3.5 h-3.5 text-emerald-300" />
+                              <span>Saved</span>
+                            </>
+                          ) : (
+                            <span>Save as Draft</span>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -856,138 +968,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
         )}
 
         {/* ========================================================= */}
-        {/* TAB 3: MULTI-MODEL CAPTION GENERATOR                      */}
-        {/* ========================================================= */}
-        {activeTab === "caption" && (
-          <div className="space-y-5">
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                {topic ? "Your post topic (edit to redirect the AI)" : "What is your post about?"}
-              </label>
-              <textarea
-                rows={3}
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="e.g. Announcing our 2026 AI Product Roadmap with automated scheduler & instant analytics..."
-                className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Primary Platform</label>
-                <div className="flex gap-2">
-                  {[
-                    { id: "instagram", label: "Instagram", icon: InstagramIcon },
-                    { id: "facebook", label: "Facebook", icon: FacebookIcon },
-                  ].map((p) => {
-                    const Icon = p.icon;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => setPlatform(p.id)}
-                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md border text-xs font-semibold transition ${
-                          platform === p.id
-                            ? "border-indigo-500 bg-indigo-950/40 text-indigo-200"
-                            : "border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200"
-                        }`}
-                      >
-                        <Icon className="w-3.5 h-3.5" />
-                        {p.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Tone of Voice</label>
-                <select
-                  value={tone}
-                  onChange={(e) => setTone(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs font-medium text-white focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="casual">Casual & Friendly</option>
-                  <option value="professional">Professional & Direct</option>
-                  <option value="excited">Energetic & Inspiring</option>
-                  <option value="witty">Witty & Playful</option>
-                </select>
-              </div>
-            </div>
-
-            <button
-              onClick={handleGenerateCaption}
-              disabled={captionLoading}
-              className="w-full py-2.5 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition flex items-center justify-center gap-2"
-            >
-              <SparklesIcon className="w-4 h-4" />
-              <span>{captionLoading ? "Synthesizing across models…" : "Generate with AI"}</span>
-            </button>
-
-            {candidates.length > 0 && (
-              <div className="space-y-4 pt-3 border-t border-slate-800">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
-                  <span>Model Comparison</span>
-                  <span className="text-[11px] text-slate-500">{candidates.length} options evaluated</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {candidates.map((cand, idx) => {
-                    const isSelected = selectedCandidateIndex === idx;
-                    return (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setSelectedCandidateIndex(idx)}
-                        className={`p-3 rounded-lg border text-left transition flex flex-col justify-between ${
-                          isSelected
-                            ? "border-indigo-500 bg-indigo-950/40 text-white"
-                            : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-bold text-xs">{cand.label || cand.provider}</span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
-                            {cand.model}
-                          </span>
-                        </div>
-                        <p className="text-[11px] line-clamp-2 text-slate-300 mt-1">
-                          {cand.caption || "No caption generated"}
-                        </p>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {candidates[selectedCandidateIndex] && (
-                  <div className="p-4 rounded-md bg-slate-950 border border-slate-800 space-y-3">
-                    <p className="text-xs text-slate-200 whitespace-pre-wrap leading-relaxed">
-                      {candidates[selectedCandidateIndex].caption}
-                    </p>
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
-                      <button
-                        onClick={() => copyText(candidates[selectedCandidateIndex].caption, "caption")}
-                        className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
-                      >
-                        {copiedCaptionIdx === selectedCandidateIndex ? "Copied!" : "Copy Caption"}
-                      </button>
-                      <button
-                        onClick={() => applyToEditor(candidates[selectedCandidateIndex].caption)}
-                        className="px-4 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition"
-                      >
-                        Insert into Editor
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ========================================================= */}
-        {/* TAB 4: SMART HASHTAGS                                     */}
+        {/* TAB 3: HASHTAGS                                           */}
         {/* ========================================================= */}
         {activeTab === "hashtags" && (
           <div className="space-y-4">
@@ -999,8 +980,8 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                 rows={4}
                 value={tagContent}
                 onChange={(e) => setTagContent(e.target.value)}
-                placeholder="Paste your post body or core keywords here..."
-                className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                placeholder="e.g. Sourdough bread, artisanal bakery, fresh morning croissants, organic wheat..."
+                className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
               />
             </div>
 
@@ -1010,7 +991,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
               className="w-full py-2.5 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition flex items-center justify-center gap-2"
             >
               <SparklesIcon className="w-4 h-4" />
-              <span>{tagLoading ? "Analyzing Keywords…" : "Generate Smart Hashtags"}</span>
+              <span>{tagLoading ? "Analyzing Keywords…" : "Find Hashtags"}</span>
             </button>
 
             {generatedTags.length > 0 && (

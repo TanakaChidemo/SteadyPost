@@ -199,6 +199,7 @@ export const api = {
     approve: (id, data = {}) => apiClient.post(`/posts/${id}/approve`, data).then((r) => r.data),
     requestChanges: (id, data = {}) => apiClient.post(`/posts/${id}/request-changes`, data).then((r) => r.data),
     publishNow: (id) => apiClient.post(`/posts/${id}/publish-now`).then((r) => r.data),
+    publishApproved: (data = {}) => apiClient.post("/posts/publish-approved", data).then((r) => r.data),
   },
   ai: {
     generateCaption: (data) => apiClient.post("/ai/generate-caption", data).then((r) => r.data),

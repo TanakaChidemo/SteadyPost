@@ -9,6 +9,20 @@ describe("Content Adaptation Service (#05)", () => {
   const sampleIdea =
     "We analyzed 10,000 marketing campaigns and found that posting consistent platform-native formats increased audience engagement by 3.4x.";
 
+  beforeEach(() => {
+    jest.spyOn(global, "fetch").mockImplementation(() =>
+      Promise.resolve({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: "AI service mock fallback" }),
+      })
+    );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   describe("Platform Specifications", () => {
     it("defines valid platform specs with maxChars and guidelines for core channels", () => {
       expect(PLATFORM_SPECS.twitter).toBeDefined();

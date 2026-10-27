@@ -118,9 +118,6 @@ function buildLocalChannelVariant({
 }
 
 async function forwardToAiService(path, body) {
-  if (process.env.NODE_ENV === "test" && !process.env.TEST_AI_SERVICE) {
-    return null;
-  }
   try {
     const timeoutMs = parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 12000;
     const controller = new AbortController();
@@ -151,15 +148,22 @@ async function adaptIdeaToChannels({
   sourcePost = null,
 }) {
   const allowed = ["twitter", "linkedin", "instagram", "facebook"];
-  let targetChannels =
-    Array.isArray(channels) && channels.length > 0
-      ? [...new Set(channels.map((c) => String(c).toLowerCase().trim()))].filter((c) =>
-          allowed.includes(c)
-        )
-      : ["instagram", "facebook"];
-
-  if (targetChannels.length === 0) {
-    targetChannels = ["instagram", "facebook"];
+  let targetChannels = ["instagram", "facebook"];
+  if (Array.isArray(channels)) {
+    if (channels.length === 0) {
+      const err = new Error("At least one target channel is required");
+      err.status = 400;
+      throw err;
+    }
+    const filtered = [...new Set(channels.map((c) => String(c).toLowerCase().trim()))].filter((c) =>
+      allowed.includes(c)
+    );
+    if (filtered.length === 0) {
+      const err = new Error("None of the requested channels are supported");
+      err.status = 400;
+      throw err;
+    }
+    targetChannels = filtered;
   }
 
   // 1. Try remote AI service (Groq / OpenRouter / Gemini / OpenAI)
@@ -238,4 +242,5 @@ module.exports = {
   clampText,
   buildLocalChannelVariant,
   adaptIdeaToChannels,
+  forwardToAiService,
 };
