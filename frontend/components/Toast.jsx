@@ -30,12 +30,25 @@ export function ToastContainer() {
             )}
             <span>{toast.text}</span>
           </div>
-          <button
-            onClick={() => removeToast(toast.id)}
-            className="text-xs opacity-60 hover:opacity-100 transition p-1"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            {toast.action && (
+              <button
+                onClick={() => {
+                  removeToast(toast.id);
+                  toast.action.onClick();
+                }}
+                className="text-xs font-semibold px-2 py-1 rounded border border-current/30 hover:bg-white/10 transition whitespace-nowrap"
+              >
+                {toast.action.label}
+              </button>
+            )}
+            <button
+              onClick={() => removeToast(toast.id)}
+              className="text-xs opacity-60 hover:opacity-100 transition p-1"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       ))}
     </div>

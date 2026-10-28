@@ -5,16 +5,7 @@ const membershipModel = require("../models/membership.model");
 const businessProfileModel = require("../models/businessProfile.model");
 const notificationSettingsModel = require("../models/notificationSettings.model");
 const userModel = require("../models/user.model");
-
-const createWorkspaceSchema = z.object({
-  name: z.string().optional(),
-  businessType: z.string().optional(),
-  websiteUrl: z.string().optional(),
-  offer: z.string().optional(),
-  audience: z.string().optional(),
-  tone: z.array(z.string()).optional(),
-  goals: z.array(z.string()).optional(),
-});
+const { profileFieldsSchema } = require("../validation/businessProfile");
 
 const inviteMemberSchema = z.object({
   email: z.string().email(),
@@ -24,7 +15,7 @@ const inviteMemberSchema = z.object({
 async function list(req, res) {
   const memberships = await membershipModel.listUserWorkspaces(req.user.id);
   const workspaceIds = memberships.map((m) => m.workspaceId);
-  const workspaces = await workspaceModel.find({ _id: { $in: workspaceIds } });
+  const workspaces = await workspaceModel.find({ _id: { $in: workspaceIds }, ...workspaceModel.NOT_ARCHIVED });
   const profiles = await businessProfileModel.find({ workspaceId: { $in: workspaceIds } });
 
   const enriched = workspaces.map((ws) => {
@@ -39,6 +30,7 @@ async function list(req, res) {
       businessType: prof?.businessType || "",
       websiteUrl: prof?.websiteUrl || "",
       tone: prof?.tone || [],
+      onboardingComplete: businessProfileModel.isOnboardingComplete(prof),
     };
   });
 
@@ -46,7 +38,7 @@ async function list(req, res) {
 }
 
 async function create(req, res) {
-  const parsed = createWorkspaceSchema.safeParse(req.body);
+  const parsed = profileFieldsSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
   }
@@ -57,11 +49,14 @@ async function create(req, res) {
     websiteUrl = "",
     offer = "",
     audience = "",
+    location,
     tone = ["professional"],
     goals = ["brand_awareness"],
+    activeChannels = [],
+    onboardingCompleted,
   } = parsed.data;
 
-  const profileName = (name && name.trim()) || (businessType && businessType.trim()) || "New Business Profile";
+  const profileName = name || businessType || "New Business Profile";
 
   const workspace = await workspaceModel.create({
     name: profileName,
@@ -80,11 +75,14 @@ async function create(req, res) {
   const profile = await businessProfileModel.create({
     workspaceId: workspace.id,
     businessType: businessType || profileName,
-    websiteUrl: websiteUrl ? websiteUrl.trim() : "",
+    websiteUrl,
     offer,
     audience,
+    location,
     tone,
     goals,
+    activeChannels,
+    onboardingCompletedAt: onboardingCompleted ? new Date() : null,
   });
 
   await notificationSettingsModel.create({
@@ -108,7 +106,7 @@ async function create(req, res) {
 
 async function getById(req, res) {
   const ws = await workspaceModel.findById(req.params.id);
-  if (!ws) return res.status(404).json({ error: "Workspace not found" });
+  if (!ws || ws.status === "archived") return res.status(404).json({ error: "Workspace not found" });
 
   const membership = await membershipModel.findByUserAndWorkspace(req.user.id, ws.id);
   if (!membership) return res.status(403).json({ error: "Access denied" });
@@ -140,6 +138,10 @@ async function switchWorkspace(req, res) {
 
   if (!membership) {
     return res.status(403).json({ error: "You are not a member of this workspace" });
+  }
+
+  if ((await workspaceModel.filterActiveIds([targetWorkspaceId])).length === 0) {
+    return res.status(404).json({ error: "This workspace has been archived" });
   }
 
   await userModel.setActiveWorkspace(req.user.id, targetWorkspaceId);
@@ -205,7 +207,7 @@ async function acceptInvitation(req, res) {
     inviteExpiresAt: { $gt: new Date() },
   });
 
-  if (!membership) {
+  if (!membership || (await workspaceModel.filterActiveIds([membership.workspaceId])).length === 0) {
     return res.status(400).json({ error: "Invalid or expired invitation token" });
   }
 
@@ -241,8 +243,42 @@ async function removeMember(req, res) {
   return res.status(204).send();
 }
 
+/**
+ * Archives the current workspace (owner only). Nothing is deleted: the
+ * workspace and everything in it are kept, but it no longer appears in
+ * anyone's list and can't be opened, switched to or joined. The owner can't
+ * archive their last workspace. The owner is moved to another workspace.
+ */
+async function archive(req, res) {
+  const workspace = await workspaceModel.findById(req.workspaceId);
+
+  const memberships = await membershipModel.listUserWorkspaces(req.user.id);
+  const others = await workspaceModel.filterActiveIds(
+    memberships.map((m) => m.workspaceId).filter((id) => id !== req.workspaceId)
+  );
+  if (others.length === 0) {
+    return res.status(409).json({ error: "You can't archive your only workspace." });
+  }
+
+  await workspaceModel.updateById(req.workspaceId, { status: "archived", archivedAt: new Date() });
+
+  const user = await userModel.findById(req.user.id);
+  let activeWorkspaceId = user?.activeWorkspaceId;
+  if (!others.includes(activeWorkspaceId)) {
+    activeWorkspaceId = others[0];
+    await userModel.setActiveWorkspace(req.user.id, activeWorkspaceId);
+  }
+
+  return res.json({
+    message: "Workspace archived",
+    archived: { id: workspace.id, name: workspace.name },
+    activeWorkspaceId,
+  });
+}
+
 module.exports = {
   list,
+  archive,
   create,
   getById,
   update,

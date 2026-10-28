@@ -17,6 +17,7 @@ router.get("/current", resolveWorkspace, (req, res) => {
 });
 
 router.put("/current", resolveWorkspace, requireWorkspaceRole("owner"), controller.update);
+router.post("/current/archive", resolveWorkspace, requireWorkspaceRole("owner"), controller.archive);
 router.get("/current/members", resolveWorkspace, controller.listMembers);
 router.post("/current/invitations", resolveWorkspace, requireWorkspaceRole("owner"), controller.inviteMember);
 router.delete(

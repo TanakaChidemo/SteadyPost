@@ -16,6 +16,8 @@ tags:
   - name: Publish
   - name: SocialAccounts
   - name: Website
+  - name: BusinessProfile
+  - name: Workspaces
 
 paths:
   /auth/register:
@@ -188,14 +190,69 @@ paths:
       responses:
         "200": { description: Linked accounts }
 
+  /business-profile/profile:
+    get:
+      tags: [BusinessProfile]
+      summary: The current workspace's business profile (created empty on first read)
+      description: >
+        Scoped to the active workspace (or `X-Workspace-Id`). `name` is the
+        workspace's name. `onboardingComplete` is false until the onboarding
+        wizard is finished (profiles with an offer and audience from before
+        the wizard count as complete).
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Business profile }
+        "403": { description: Not a member of the requested workspace }
+    put:
+      tags: [BusinessProfile]
+      summary: Update the current workspace's business profile
+      description: >
+        Partial update: fields that aren't sent are left unchanged, and
+        unknown fields are ignored. Text is trimmed. Repeated tones, goals
+        and channels are removed. Owners and editors only.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessProfileFields" }
+      responses:
+        "200": { description: Updated business profile (same shape as GET) }
+        "400": { description: Validation failed (`details` lists each problem) }
+        "403": { description: Not a member of the workspace, or a viewer }
+
+  /workspaces/current/archive:
+    post:
+      tags: [Workspaces]
+      summary: Archive the current workspace
+      description: >
+        Owner only. Nothing is deleted: the workspace, its profile, posts and
+        linked accounts are kept, but it no longer appears in any member's
+        workspace list and can't be opened, switched to or joined (requests
+        naming it get 404). An owner can't archive their only workspace. If it
+        was the owner's active workspace, another of theirs becomes active;
+        other members fall back to another of their workspaces on their next
+        request.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: >
+            Archived. `archived` gives its `id` and `name`; `activeWorkspaceId`
+            is the owner's active workspace afterwards.
+        "403": { description: Not a member of the workspace, or not its owner }
+        "404": { description: The workspace is already archived }
+        "409": { description: It's the owner's only workspace }
+
   /website/preview:
     post:
       tags: [Website]
       summary: Read a business website once and return the details it exposes (nothing is saved)
       description: >
-        Fetches the page and extracts name, address, opening hours, services,
-        logo and content feed URL from schema.org markup (JSON-LD or
-        microdata) and Open Graph tags. With no markup (e.g. a single-page
+        Fetches the page and extracts name, description, address, opening
+        hours, services, logo and content feed URL from schema.org markup
+        (JSON-LD or microdata) and Open Graph tags. The description falls
+        back to `og:description`, then `<meta name="description">`, and is
+        cut to 1000 characters. With no markup (e.g. a single-page
         app), the name falls back to the page title and the logo to an
         apple-touch-icon or SVG/PNG icon. A bare domain ("rosiesbakery.co.uk")
         is read as https. A timeout is retried once, for hosts that wake
@@ -272,6 +329,38 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  schemas:
+    BusinessProfileFields:
+      type: object
+      description: Also accepted by `POST /workspaces`, which creates a workspace with its profile.
+      properties:
+        name: { type: string, maxLength: 80, description: Saved as the workspace name }
+        businessType: { type: string, maxLength: 80 }
+        websiteUrl: { type: string, maxLength: 2048 }
+        offer: { type: string, maxLength: 500 }
+        audience: { type: string, maxLength: 300 }
+        location:
+          type: object
+          properties:
+            city: { type: string, maxLength: 100 }
+            region: { type: string, maxLength: 100 }
+            country: { type: string, maxLength: 100 }
+            serviceArea: { type: string, maxLength: 200 }
+        tone:
+          type: array
+          items:
+            type: string
+            enum: [professional, inspiring, tech-forward, casual, authoritative, bold, playful]
+        goals:
+          type: array
+          items: { type: string, enum: [brand_awareness, lead_generation, community_growth, thought_leadership] }
+        activeChannels:
+          type: array
+          items: { type: string, enum: [facebook, instagram] }
+        onboardingCompleted:
+          type: boolean
+          enum: [true]
+          description: Sent by the last step of the onboarding wizard; records `onboardingCompletedAt`.
   parameters:
     idParam:
       name: id

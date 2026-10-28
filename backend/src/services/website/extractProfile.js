@@ -71,6 +71,7 @@ const NON_BUSINESS_TYPES = new Set([
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const DAY_ABBREV = { mo: 0, tu: 1, we: 2, th: 3, fr: 4, sa: 5, su: 6 };
 const MAX_SERVICES = 50;
+const MAX_DESCRIPTION = 1000;
 
 const asArray = (v) => (v === undefined || v === null ? [] : Array.isArray(v) ? v : [v]);
 
@@ -336,6 +337,19 @@ function readIconLogo($, baseUrl) {
   return logo;
 }
 
+// The site's own one-line summary, used to prefill the profile's Offer (#04.1).
+function normaliseDescription(value) {
+  const s = text(value);
+  if (!s) return null;
+  if (s.length <= MAX_DESCRIPTION) return s;
+  const cut = s.slice(0, MAX_DESCRIPTION);
+  return cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : MAX_DESCRIPTION);
+}
+
+function readMetaDescription($) {
+  return $('meta[name="description" i]').first().attr("content");
+}
+
 function readFeedUrl($, baseUrl) {
   const href = $(
     'link[rel~="alternate"][type="application/rss+xml"], link[rel~="alternate"][type="application/atom+xml"]'
@@ -348,7 +362,9 @@ function readFeedUrl($, baseUrl) {
 /**
  * Extract the business details a site exposes through schema.org markup
  * (JSON-LD or microdata) and Open Graph tags, falling back to the page
- * <title> for the name and its icons for the logo. Pure: no network access.
+ * <title> for the name and its icons for the logo. The description comes
+ * from schema.org, then og:description, then <meta name="description">.
+ * Pure: no network access.
  *
  * Field names line up with BusinessProfile (#04) so the website connection
  * (#03.1) can map them across directly.
@@ -362,6 +378,7 @@ function extractProfile(html, baseUrl) {
 
   const fields = {
     name: null,
+    description: null,
     address: null,
     hours: null,
     services: null,
@@ -381,6 +398,9 @@ function extractProfile(html, baseUrl) {
   set("name", og.site_name, "open-graph");
   set("name", og.title, "open-graph");
   set("name", readTitleName($), "html");
+  set("description", normaliseDescription(business.description), businessSource);
+  set("description", normaliseDescription(og.description), "open-graph");
+  set("description", normaliseDescription(readMetaDescription($)), "html");
   set("address", normaliseAddress(business.address), businessSource);
   set("hours", normaliseHours(business), businessSource);
   set("services", normaliseServices(business), businessSource);
@@ -389,7 +409,7 @@ function extractProfile(html, baseUrl) {
   set("logo", readIconLogo($, baseUrl), "html");
   if (fields.contentFeedUrl) sources.contentFeedUrl = "html";
 
-  const found = ["name", "address", "hours", "services", "logo"].some((k) => fields[k]);
+  const found = ["name", "description", "address", "hours", "services", "logo"].some((k) => fields[k]);
   return { found, fields, sources };
 }
 

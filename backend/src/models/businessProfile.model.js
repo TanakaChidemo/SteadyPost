@@ -18,6 +18,9 @@ const businessProfileSchema = new mongoose.Schema(
     tone: { type: [String], default: [] },
     goals: { type: [String], default: [] },
     activeChannels: { type: [String], default: [] },
+    // Set when the onboarding wizard is finished (#04). Null means the
+    // workspace still needs onboarding; see isOnboardingComplete.
+    onboardingCompletedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -42,9 +45,17 @@ async function upsert(workspaceId, profileData) {
   return withId(updated);
 }
 
+// Profiles filled in before the wizard existed have no onboardingCompletedAt,
+// but someone already described the business, so don't send them through
+// onboarding again.
+function isOnboardingComplete(profile) {
+  if (!profile) return false;
+  return Boolean(profile.onboardingCompletedAt || (profile.offer && profile.audience));
+}
+
 async function create(data) {
   const doc = await BusinessProfile.create(data);
   return withId(doc.toObject());
 }
 
-module.exports = { BusinessProfile, findByWorkspaceId, find, upsert, create };
+module.exports = { BusinessProfile, findByWorkspaceId, find, upsert, create, isOnboardingComplete };

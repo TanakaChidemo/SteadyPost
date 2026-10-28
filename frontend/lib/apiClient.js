@@ -3,6 +3,10 @@ import axios from "axios";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000/api/v1";
 
+// Reading a website can take the server two 8-second attempts (a sleeping site
+// is retried once after it wakes), so the browser waits longer than usual.
+const WEBSITE_READ_TIMEOUT_MS = 25000;
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -53,8 +57,10 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // A request may name its workspace (e.g. a retry for a profile that's no
+  // longer the active one); otherwise it's the active workspace.
   const workspaceId = getActiveWorkspaceId();
-  if (workspaceId) {
+  if (workspaceId && !config.headers["X-Workspace-Id"]) {
     config.headers["X-Workspace-Id"] = workspaceId;
   }
   return config;
@@ -174,6 +180,7 @@ export const api = {
     current: () => apiClient.get("/workspaces/current").then((r) => r.data),
     create: (data) => apiClient.post("/workspaces", data).then((r) => r.data),
     switch: (id) => apiClient.post(`/workspaces/switch/${id}`).then((r) => r.data),
+    archiveCurrent: () => apiClient.post("/workspaces/current/archive").then((r) => r.data),
     listMembers: () => apiClient.get("/workspaces/current/members").then((r) => r.data.items || []),
     inviteMember: (data) => apiClient.post("/workspaces/current/invitations", data).then((r) => r.data),
   },
@@ -182,6 +189,33 @@ export const api = {
     update: (data) => apiClient.put("/business-profile/profile", data).then((r) => r.data),
     getNotifications: () => apiClient.get("/business-profile/notifications").then((r) => r.data),
     updateNotifications: (data) => apiClient.put("/business-profile/notifications", data).then((r) => r.data),
+  },
+  website: {
+    // Reads a site without saving anything (used before a workspace exists).
+    preview: (url) =>
+      apiClient.post("/website/preview", { url }, { timeout: WEBSITE_READ_TIMEOUT_MS }).then((r) => r.data),
+    // Reads the site and saves it as the workspace's connection (the active
+    // one unless `workspaceId` is given).
+    connect: (url, workspaceId) =>
+      apiClient
+        .put(
+          "/website/connection",
+          { url },
+          {
+            timeout: WEBSITE_READ_TIMEOUT_MS,
+            headers: workspaceId ? { "X-Workspace-Id": workspaceId } : undefined,
+          }
+        )
+        .then((r) => r.data),
+    // The saved connection, or null when the workspace has none.
+    getConnection: () =>
+      apiClient
+        .get("/website/connection")
+        .then((r) => r.data)
+        .catch((err) => {
+          if (err.response?.status === 404) return null;
+          throw err;
+        }),
   },
   ai: {
     generateCaption: (data) => apiClient.post("/ai/generate-caption", data).then((r) => r.data),
