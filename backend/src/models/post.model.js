@@ -87,12 +87,18 @@ async function deleteOne(query) {
   return Post.deleteOne(query);
 }
 
+async function createMany(items) {
+  const docs = await Post.insertMany(items);
+  return docs.map((d) => withId(d.toObject()));
+}
+
 module.exports = {
   Post,
   findByWorkspaceId,
   findById,
   findOne,
   create,
+  createMany,
   updateById,
   deleteOne,
 };

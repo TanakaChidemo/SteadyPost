@@ -379,6 +379,26 @@ async function listMetaPages(req, res) {
 
   try {
     const pages = await findAccessiblePages(accessToken);
+    if (!pages || pages.length === 0) {
+      return res.json({
+        pages: [],
+        handoff: "setup_walkthrough",
+        walkthrough: {
+          feature: "F27",
+          specNumber: "#08",
+          step: "no_pages_found",
+          title: "No Facebook Page or Professional Account Found",
+          message: "Meta requires a Facebook Business Page or Instagram Professional Account connected to a Business Portfolio.",
+          checklist: [
+            "Create a Facebook Business Page for your brand or venture.",
+            "Switch your Instagram profile to a Professional / Business account.",
+            "Link your Instagram Professional account to your Facebook Page in Meta Business Suite.",
+            "Ensure you have full management access in Meta Business Suite.",
+          ],
+        },
+      });
+    }
+
     return res.json({
       pages: pages.map((page) => ({ id: page.id, name: page.name, category: page.category || null })),
     });
@@ -405,25 +425,40 @@ async function connectMetaPage(req, res) {
     const page = await pageRes.json();
     logger.info({ status: pageRes.status, pageId: page.id }, "Meta Page connect lookup");
     if (!pageRes.ok || !page.access_token) {
-      return res.status(422).json({ error: "no_facebook_page_found" });
+      return res.status(422).json({
+        error: "no_facebook_page_found",
+        handoff: "setup_walkthrough",
+        walkthrough: {
+          feature: "F27",
+          specNumber: "#08",
+          title: "No Facebook Page Found or Missing Permissions",
+          message: "Could not retrieve Page access token. Please follow the setup walkthrough (#08, F27).",
+        },
+      });
     }
 
+    const targetWorkspaceId = req.workspaceId || req.user.activeWorkspaceId || null;
+
     await socialAccountModel.create({
+      workspaceId: targetWorkspaceId,
       ownerId: req.user.id,
       platform: "facebook",
       externalAccountId: page.id,
       displayName: page.name || "Connected Facebook Page",
       accessToken: page.access_token,
+      linkedBy: req.user.id,
     });
 
     const igAccount = page.instagram_business_account;
     if (igAccount) {
       await socialAccountModel.create({
+        workspaceId: targetWorkspaceId,
         ownerId: req.user.id,
         platform: "instagram",
         externalAccountId: igAccount.id,
         displayName: igAccount.username ? `@${igAccount.username}` : "Connected Instagram Account",
         accessToken: page.access_token,
+        linkedBy: req.user.id,
       });
     }
 
@@ -440,12 +475,15 @@ async function connectMockAccount(req, res) {
 
   const extId = handle || `${platform}_${Date.now()}`;
   const name = displayName || `${platform.toUpperCase()} Account (@${extId})`;
+  const targetWorkspaceId = req.workspaceId || req.user.activeWorkspaceId || null;
 
   const account = await socialAccountModel.create({
+    workspaceId: targetWorkspaceId,
     ownerId: req.user.id,
     platform,
     externalAccountId: extId,
     displayName: name,
+    linkedBy: req.user.id,
   });
 
   return res.status(201).json(account);

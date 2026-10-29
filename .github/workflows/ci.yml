@@ -68,8 +68,8 @@ jobs:
           cache: "pip"
       - run: pip install -r requirements.txt
       - run: pip install flake8 pytest
-      - run: flake8 app --max-line-length=100
-      - run: pytest || true # placeholder until test suite is added
+      - run: flake8 app tests --max-line-length=100
+      - run: pytest
 
   docker-build:
     name: Build Docker images

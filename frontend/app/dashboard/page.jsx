@@ -95,7 +95,7 @@ export default function DashboardOverviewPage() {
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-purple-950/60 border border-purple-500/40 text-purple-300 text-xs font-semibold hover:border-purple-400 transition"
             >
               <SparklesIcon className="w-4 h-4 text-purple-400" />
-              <span>AI Copywriter</span>
+              <span>Write with AI</span>
             </button>
           )}
           <Link
@@ -178,7 +178,7 @@ export default function DashboardOverviewPage() {
             rows={4}
             value={quickPost}
             onChange={(e) => setQuickPost(e.target.value)}
-            placeholder={`Draft a quick update for ${quickPlatform}... (or click"AI Copywriter" for assistance)`}
+            placeholder={`Draft a quick update for ${quickPlatform}...`}
             className="w-full px-4 py-3 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-sans"
           />
 
@@ -192,15 +192,6 @@ export default function DashboardOverviewPage() {
             </Link>
 
             <div className="flex items-center gap-2">
-              {user && (
-                <button
-                  onClick={() => setAiModalOpen(true)}
-                  className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition flex items-center gap-1"
-                >
-                  <SparklesIcon className="w-3.5 h-3.5 text-purple-400" />
-                  <span>AI</span>
-                </button>
-              )}
               <button
                 onClick={handleQuickPublish}
                 disabled={isPublishing}

@@ -8,6 +8,9 @@ import { api } from "../lib/apiClient";
 import {
   InstagramIcon,
   FacebookIcon,
+  TwitterIcon,
+  LinkedInIcon,
+  GoogleIcon,
   SparklesIcon,
   PlusIcon,
   TrashIcon,
@@ -21,6 +24,9 @@ import { AIModal } from "./AIModal";
 const PLATFORMS = [
   { id: "instagram", label: "Instagram", icon: InstagramIcon, maxChars: 2200, color: "text-pink-400 border-pink-500/40 bg-pink-500/10" },
   { id: "facebook", label: "Facebook", icon: FacebookIcon, maxChars: 63206, color: "text-blue-500 border-blue-600/40 bg-blue-600/10" },
+  { id: "twitter", label: "Twitter / X", icon: TwitterIcon, maxChars: 280, color: "text-sky-400 border-sky-500/40 bg-sky-500/10" },
+  { id: "linkedin", label: "LinkedIn", icon: LinkedInIcon, maxChars: 3000, color: "text-blue-400 border-blue-500/40 bg-blue-500/10" },
+  { id: "gbp", label: "Google Business", icon: GoogleIcon, maxChars: 1500, color: "text-amber-400 border-amber-500/40 bg-amber-500/10" },
 ];
 
 const MAX_MEDIA = 4;
@@ -320,7 +326,7 @@ export function ContentStudio() {
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border border-purple-500/40 text-purple-200 hover:border-purple-400 text-xs font-semibold transition"
           >
             <SparklesIcon className="w-4 h-4 text-purple-400" />
-            <span>AI Assist</span>
+            <span>Write with AI</span>
           </button>
 
           <button
@@ -411,7 +417,7 @@ export function ContentStudio() {
                 rows={7}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
-                placeholder="Write your post here or use AI Studio to generate captions, hashtags, and variations..."
+                placeholder='Write your post here or click "Write with AI" to generate captions, hashtags, and variations...'
                 className="w-full px-4 py-3 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 leading-relaxed font-sans"
               />
             </div>
@@ -475,14 +481,6 @@ export function ContentStudio() {
                 className="px-4 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {loading ? "Saving…" : "Save as Draft"}
-              </button>
-
-              <button
-                onClick={() => setAiModalOpen(true)}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5"
-              >
-                <SparklesIcon className="w-4 h-4" />
-                <span>Optimize with AI</span>
               </button>
             </div>
           </div>
@@ -678,6 +676,7 @@ export function ContentStudio() {
       <AIModal
         initialContent={body}
         onInsert={(text) => setBody((prev) => (prev ? `${prev}\n\n${text}` : text))}
+        onDraftCreated={() => loadDrafts()}
       />
     </div>
   );

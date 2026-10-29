@@ -3,444 +3,653 @@
 import React, { useState, useEffect } from "react";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
-import { SparklesIcon, InstagramIcon, FacebookIcon, CheckIcon } from "./Icons";
+import {
+  SparklesIcon,
+  InstagramIcon,
+  FacebookIcon,
+  CheckIcon,
+  RefreshIcon,
+  SpinnerIcon,
+} from "./Icons";
 
-export function AIModal({ onInsert, initialContent }) {
+// Only networks where publishing is currently supported
+const AVAILABLE_CHANNELS = [
+  {
+    id: "instagram",
+    label: "Instagram",
+    icon: InstagramIcon,
+    maxChars: 2200,
+    color: "text-pink-400 border-pink-500/40 bg-pink-500/10",
+  },
+  {
+    id: "facebook",
+    label: "Facebook",
+    icon: FacebookIcon,
+    maxChars: 5000,
+    color: "text-indigo-400 border-indigo-500/40 bg-indigo-500/10",
+  },
+];
+
+// Single unified tone list matching the Business Profile
+const UNIFIED_TONES = [
+  { id: "professional", label: "Professional" },
+  { id: "inspiring", label: "Inspiring" },
+  { id: "tech-forward", label: "Tech-Forward" },
+  { id: "casual", label: "Casual" },
+  { id: "authoritative", label: "Authoritative" },
+  { id: "bold", label: "Bold" },
+  { id: "playful", label: "Playful" },
+];
+
+export function AIModal({ onInsert, initialContent, onDraftCreated }) {
   const { isAiModalOpen, setAiModalOpen, addToast } = useAppStore();
-  const [activeTab, setActiveTab] = useState("caption");
+  const [activeTab, setActiveTab] = useState("write"); // write | repurpose | hashtags
 
-  // Caption generator state
-  const [topic, setTopic] = useState("");
-  const [platform, setPlatform] = useState("instagram");
-  const [tone, setTone] = useState("casual");
-  const [generatedCaption, setGeneratedCaption] = useState("");
-  const [candidates, setCandidates] = useState([]);
-  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
-  const [copiedIndex, setCopiedIndex] = useState(null);
+  // --- Tab 1: Write Posts State ---
+  const [writeIdea, setWriteIdea] = useState("");
+  const [writeChannels, setWriteChannels] = useState(["instagram", "facebook"]);
+  const [writeTone, setWriteTone] = useState("professional");
+  const [writeVariants, setWriteVariants] = useState([]);
+  const [activeWriteChannel, setActiveWriteChannel] = useState("instagram");
+  const [writeLoading, setWriteLoading] = useState(false);
+  const [savingVariantChannel, setSavingVariantChannel] = useState(null);
+  const [savedVariants, setSavedVariants] = useState({});
+  const [suggestingTagsChannel, setSuggestingTagsChannel] = useState(null);
 
-  // Hashtag state
+  // --- Tab 2: Reuse a Past Post State ---
+  const [topPosts, setTopPosts] = useState([]);
+  const [loadingTopPosts, setLoadingTopPosts] = useState(false);
+  const [selectedTopPost, setSelectedTopPost] = useState(null);
+  const [repurposeChannels, setRepurposeChannels] = useState(["instagram", "facebook"]);
+  const [repurposeTone, setRepurposeTone] = useState("inspiring");
+  const [repurposeVariants, setRepurposeVariants] = useState([]);
+  const [activeRepurposeChannel, setActiveRepurposeChannel] = useState("instagram");
+  const [repurposingLoading, setRepurposingLoading] = useState(false);
+  const [savingRepurposeVariantChannel, setSavingRepurposeVariantChannel] = useState(null);
+  const [savedRepurposeVariants, setSavedRepurposeVariants] = useState({});
+
+  // --- Tab 3: Hashtags State ---
   const [tagContent, setTagContent] = useState("");
   const [generatedTags, setGeneratedTags] = useState([]);
+  const [tagLoading, setTagLoading] = useState(false);
 
-  // Repurpose state
-  const [sourceContent, setSourceContent] = useState("");
-  const [sourcePlatform, setSourcePlatform] = useState("instagram");
-  const [repurposedOutputs, setRepurposedOutputs] = useState({});
+  // Shared copy state
+  const [copiedKey, setCopiedKey] = useState(null);
 
-  const [loading, setLoading] = useState(false);
-
-  // Carry whatever's already in Post Copy into the modal on open, so
-  // "Optimize with AI" builds on what's already written instead of asking
-  // "what is this about" as if starting from nothing.
+  // Initialize from initial editor content
   useEffect(() => {
     if (isAiModalOpen && initialContent) {
-      setTopic(initialContent);
+      setWriteIdea(initialContent);
       setTagContent(initialContent);
-      setSourceContent(initialContent);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAiModalOpen, initialContent]);
+
+  // Load Business Profile tone default
+  useEffect(() => {
+    if (isAiModalOpen) {
+      api.businessProfile
+        .get()
+        .then((profile) => {
+          if (profile?.tone?.length) {
+            const firstTone = String(profile.tone[0]).toLowerCase();
+            const match = UNIFIED_TONES.find((t) => t.id === firstTone);
+            if (match) {
+              setWriteTone(match.id);
+              setRepurposeTone(match.id);
+            }
+          }
+        })
+        .catch(() => {});
+    }
   }, [isAiModalOpen]);
 
-  if (!isAiModalOpen) return null;
+  // Fetch top published posts when opening the repurpose tab
+  useEffect(() => {
+    if (isAiModalOpen && activeTab === "repurpose") {
+      loadTopPosts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAiModalOpen, activeTab]);
 
-  async function handleGenerateCaption() {
-    if (!topic.trim()) return addToast("error", "Please enter a topic or concept");
-    setLoading(true);
+  async function loadTopPosts() {
+    setLoadingTopPosts(true);
     try {
-      const res = await api.ai.generateCaption({ topic, platform, tone });
-      const rawCandidates =
-        res.candidates && res.candidates.length > 0
-          ? res.candidates
-          : [
-              {
-                provider: "default",
-                label: "SteadyPost AI",
-                model: res.model || "standard",
-                caption: res.caption,
-                status: "success",
-                error: null,
-              },
-            ];
-
-      setCandidates(rawCandidates);
-
-      const firstSuccessIdx = rawCandidates.findIndex(
-        (c) => c.status === "success" && c.caption
-      );
-      const chosenIdx = firstSuccessIdx >= 0 ? firstSuccessIdx : 0;
-      setSelectedCandidateIndex(chosenIdx);
-      setGeneratedCaption(rawCandidates[chosenIdx]?.caption || res.caption || "");
-      addToast("success", "AI captions generated across models!");
+      const res = await api.posts.getTopPerforming({ limit: 6 });
+      setTopPosts(res.items || []);
+      if (res.items?.length > 0 && !selectedTopPost) {
+        setSelectedTopPost(res.items[0]);
+      }
     } catch (err) {
-      addToast("error", err.message || "AI caption generation failed");
+      addToast("error", err.message || "Failed to load past posts");
     } finally {
-      setLoading(false);
+      setLoadingTopPosts(false);
     }
   }
 
-  function handleCopy(text, idx) {
-    if (!text) return;
-    navigator.clipboard.writeText(text);
-    setCopiedIndex(idx);
-    addToast("info", "Caption copied to clipboard");
-    setTimeout(() => setCopiedIndex(null), 2000);
+  // --- Channel Toggles ---
+  function toggleWriteChannel(id) {
+    if (writeChannels.includes(id)) {
+      if (writeChannels.length === 1) return addToast("info", "Select at least one network");
+      const next = writeChannels.filter((c) => c !== id);
+      setWriteChannels(next);
+      if (activeWriteChannel === id) setActiveWriteChannel(next[0]);
+    } else {
+      const next = [...writeChannels, id];
+      setWriteChannels(next);
+      setActiveWriteChannel(id);
+    }
+  }
+
+  function toggleRepurposeChannel(id) {
+    if (repurposeChannels.includes(id)) {
+      if (repurposeChannels.length === 1) return addToast("info", "Select at least one network");
+      const next = repurposeChannels.filter((c) => c !== id);
+      setRepurposeChannels(next);
+      if (activeRepurposeChannel === id) setActiveRepurposeChannel(next[0]);
+    } else {
+      const next = [...repurposeChannels, id];
+      setRepurposeChannels(next);
+      setActiveRepurposeChannel(id);
+    }
+  }
+
+  // --- Generation Handlers ---
+  async function handleGeneratePosts() {
+    if (!writeIdea.trim()) {
+      return addToast("error", "Please enter an idea or message to write about");
+    }
+    setWriteLoading(true);
+    setSavedVariants({});
+    try {
+      const res = await api.posts.generateVariants({
+        idea: writeIdea,
+        channels: writeChannels,
+        tone: writeTone,
+      });
+      setWriteVariants(res.variants || []);
+      if (res.variants?.length > 0) {
+        setActiveWriteChannel(res.variants[0].channel);
+      }
+      addToast(
+        "success",
+        `Created posts for ${res.variants?.length || 0} ${
+          res.variants?.length === 1 ? "network" : "networks"
+        }!`
+      );
+    } catch (err) {
+      addToast("error", err.message || "Failed to generate posts");
+    } finally {
+      setWriteLoading(false);
+    }
+  }
+
+  async function handleRepurposePost() {
+    if (!selectedTopPost) {
+      return addToast("error", "Please select a past post to reuse");
+    }
+    setRepurposingLoading(true);
+    setSavedRepurposeVariants({});
+    try {
+      const res = await api.posts.repurposePost(selectedTopPost.id, {
+        targetChannels: repurposeChannels,
+        tone: repurposeTone,
+      });
+      setRepurposeVariants(res.variants || []);
+      if (res.variants?.length > 0) {
+        setActiveRepurposeChannel(res.variants[0].channel);
+      }
+      addToast(
+        "success",
+        `Reused post for ${res.variants?.length || 0} ${
+          res.variants?.length === 1 ? "network" : "networks"
+        }!`
+      );
+    } catch (err) {
+      addToast("error", err.message || "Failed to reuse post");
+    } finally {
+      setRepurposingLoading(false);
+    }
   }
 
   async function handleGenerateHashtags() {
-    if (!tagContent.trim()) return addToast("error", "Please enter draft text to analyze");
-    setLoading(true);
-    try {
-      const res = await api.ai.suggestHashtags({ content: tagContent, platform, maxTags: 10 });
-      setGeneratedTags(res.hashtags || []);
-      addToast("success", "Smart hashtags generated!");
-    } catch (err) {
-      addToast("error", err.message || "Hashtag generation failed");
-    } finally {
-      setLoading(false);
+    if (!tagContent.trim()) {
+      return addToast("error", "Please enter draft text or keywords to analyze");
     }
-  }
-
-  async function handleRepurpose() {
-    if (!sourceContent.trim()) return addToast("error", "Please enter original content");
-    setLoading(true);
+    setTagLoading(true);
     try {
-      const targets = ["instagram", "facebook"].filter((p) => p !== sourcePlatform);
-      const res = await api.ai.repurpose({
-        content: sourceContent,
-        sourcePlatform,
-        targetPlatforms: targets,
+      const res = await api.ai.suggestHashtags({
+        content: tagContent,
+        platform: "instagram",
+        maxTags: 10,
       });
-      setRepurposedOutputs(res.repurposed || {});
-      addToast("success", "Repurposed for all social channels!");
+      setGeneratedTags(res.hashtags || []);
+      addToast("success", "Hashtags suggested!");
     } catch (err) {
-      addToast("error", err.message || "Repurposing failed");
+      addToast("error", err.message || "Hashtags generation failed");
     } finally {
-      setLoading(false);
+      setTagLoading(false);
     }
   }
 
-  function handleApply(text) {
-    if (onInsert) {
-      onInsert(text);
+  // --- Inline Hashtag Suggestion for Generated Variants ---
+  async function handleSuggestHashtagsForVariant(variant, isRepurpose = false) {
+    try {
+      setSuggestingTagsChannel(variant.channel);
+      const res = await api.ai.suggestHashtags({
+        content: variant.content?.body || "",
+        platform: variant.channel,
+        maxTags: 5,
+      });
+      if (res.hashtags && res.hashtags.length > 0) {
+        const tagsStr = res.hashtags.join(" ");
+        const currentBody = variant.content?.body || "";
+        const updatedBody = currentBody.includes(res.hashtags[0])
+          ? currentBody
+          : currentBody
+          ? `${currentBody}\n\n${tagsStr}`
+          : tagsStr;
+
+        if (isRepurpose) {
+          setRepurposeVariants((prev) =>
+            prev.map((v) =>
+              v.channel === variant.channel
+                ? {
+                    ...v,
+                    content: { ...v.content, body: updatedBody },
+                    charCount: updatedBody.length,
+                  }
+                : v
+            )
+          );
+        } else {
+          setWriteVariants((prev) =>
+            prev.map((v) =>
+              v.channel === variant.channel
+                ? {
+                    ...v,
+                    content: { ...v.content, body: updatedBody },
+                    charCount: updatedBody.length,
+                  }
+                : v
+            )
+          );
+        }
+        addToast("success", `Added ${res.hashtags.length} hashtags!`);
+      } else {
+        addToast("info", "No hashtags found");
+      }
+    } catch (err) {
+      addToast("error", err.message || "Could not generate hashtags");
+    } finally {
+      setSuggestingTagsChannel(null);
     }
-    setAiModalOpen(false);
-    addToast("success", "Inserted into editor!");
   }
+
+  // --- Save Individual Draft ---
+  async function handleSaveVariantDraft(variant) {
+    setSavingVariantChannel(variant.channel);
+    try {
+      await api.posts.batchCreate([
+        {
+          channel: variant.channel,
+          title: variant.content?.title || `Post for ${variant.channel}`,
+          body: variant.content?.body || "",
+          hashtags: variant.content?.hashtags || [],
+          aiMetadata: {
+            provider: variant.provider,
+            model: variant.model,
+            tone: writeTone,
+            idea: writeIdea,
+            source: "ai_write",
+          },
+        },
+      ]);
+      setSavedVariants((prev) => ({ ...prev, [variant.channel]: true }));
+      onDraftCreated?.();
+      addToast("success", `Saved ${variant.channel} post as draft!`);
+    } catch (err) {
+      addToast("error", err.message || "Failed to save draft");
+    } finally {
+      setSavingVariantChannel(null);
+    }
+  }
+
+  async function handleSaveRepurposeVariantDraft(variant) {
+    setSavingRepurposeVariantChannel(variant.channel);
+    try {
+      await api.posts.batchCreate([
+        {
+          channel: variant.channel,
+          title: variant.content?.title || `Repurposed for ${variant.channel}`,
+          body: variant.content?.body || "",
+          hashtags: variant.content?.hashtags || [],
+          aiMetadata: {
+            provider: variant.provider,
+            model: variant.model,
+            tone: repurposeTone,
+            sourcePostId: selectedTopPost?.id,
+            repurposed: true,
+          },
+        },
+      ]);
+      setSavedRepurposeVariants((prev) => ({ ...prev, [variant.channel]: true }));
+      onDraftCreated?.();
+      addToast("success", `Saved ${variant.channel} post as draft!`);
+    } catch (err) {
+      addToast("error", err.message || "Failed to save draft");
+    } finally {
+      setSavingRepurposeVariantChannel(null);
+    }
+  }
+
+  // --- Shared Actions ---
+  function copyText(text, key) {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+    addToast("info", "Copied to clipboard!");
+  }
+
+  function applyToEditor(text) {
+    if (onInsert) onInsert(text);
+    setAiModalOpen(false);
+    addToast("success", "Inserted into Content Studio!");
+  }
+
+  if (!isAiModalOpen) return null;
+
+  const currentWriteVariant = writeVariants.find((v) => v.channel === activeWriteChannel);
+  const currentRepurposeVariant = repurposeVariants.find(
+    (v) => v.channel === activeRepurposeChannel
+  );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85">
-      <div className="relative w-full max-w-5xl p-6 rounded-xl bg-slate-900 border border-slate-800 max-h-[92vh] overflow-y-auto shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm">
+      <div className="relative w-full max-w-4xl p-6 rounded-xl bg-slate-900 border border-slate-800 max-h-[92vh] overflow-y-auto shadow-2xl">
         <button
           onClick={() => setAiModalOpen(false)}
           className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg p-1"
+          aria-label="Close"
         >
           ✕
         </button>
 
+        {/* Modal Header */}
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-md gradient-brand flex items-center justify-center">
+          <div className="w-10 h-10 rounded-md gradient-brand flex items-center justify-center shadow-md">
             <SparklesIcon className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">AI Content Assistant</h2>
+            <h2 className="text-lg font-bold text-white tracking-tight">Write with AI</h2>
             <p className="text-xs text-slate-400">
-              Generate and compare platform-tailored copy across Groq, OpenRouter & Gemini
+              Turn an idea into platform-ready posts or reuse your past content.
             </p>
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-2 p-1 rounded-md bg-slate-950 border border-slate-800 mb-5">
+        {/* Navigation Tabs */}
+        <div className="grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-slate-950 border border-slate-800 mb-6">
           <button
-            onClick={() => setActiveTab("caption")}
-            className={`flex-1 py-2 rounded text-xs font-semibold transition ${
-              activeTab === "caption"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:text-slate-200"
+            onClick={() => setActiveTab("write")}
+            className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+              activeTab === "write"
+                ? "bg-indigo-600 text-white shadow"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            ✨ Multi-Model Caption Generator
+            <SparklesIcon className="w-3.5 h-3.5" />
+            <span>Write posts</span>
           </button>
-          <button
-            onClick={() => setActiveTab("hashtags")}
-            className={`flex-1 py-2 rounded text-xs font-semibold transition ${
-              activeTab === "hashtags"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            # Smart Hashtags
-          </button>
+
           <button
             onClick={() => setActiveTab("repurpose")}
-            className={`flex-1 py-2 rounded text-xs font-semibold transition ${
+            className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
               activeTab === "repurpose"
-                ? "bg-indigo-600 text-white"
-                : "text-slate-400 hover:text-slate-200"
+                ? "bg-indigo-600 text-white shadow"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
             }`}
           >
-            🔄 Multi-Platform Repurposer
+            <RefreshIcon className="w-3.5 h-3.5" />
+            <span>Reuse a past post</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("hashtags")}
+            className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+              activeTab === "hashtags"
+                ? "bg-indigo-600 text-white shadow"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+            }`}
+          >
+            <span># Hashtags</span>
           </button>
         </div>
 
-        {/* Tab 1: Caption Generator */}
-        {activeTab === "caption" && (
+        {/* ========================================================= */}
+        {/* TAB 1: WRITE POSTS                                        */}
+        {/* ========================================================= */}
+        {activeTab === "write" && (
           <div className="space-y-5">
+            {/* Input Box */}
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                {topic ? "Your post topic (edit to redirect the AI)" : "What is your post about?"}
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  What would you like to post about?
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  1 idea becomes {writeChannels.length} platform-native{" "}
+                  {writeChannels.length === 1 ? "post" : "posts"}
+                </span>
+              </div>
               <textarea
                 rows={3}
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="e.g. Announcing our 2026 AI Product Roadmap with automated scheduler & instant analytics..."
-                className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                value={writeIdea}
+                onChange={(e) => setWriteIdea(e.target.value)}
+                placeholder="e.g. Fresh sourdough baked every morning with locally sourced organic grains, warm out of the oven every Friday at 7 AM at our downtown bakery..."
+                className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 leading-relaxed font-sans"
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Target Platform
+            {/* Target Networks & Tone */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+              <div className="sm:col-span-7 space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  Target Networks
                 </label>
-                <select
-                  value={platform}
-                  onChange={(e) => setPlatform(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="instagram">Instagram (Visual & Engaging)</option>
-                  <option value="facebook">Facebook (Conversational & Community)</option>
-                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  {AVAILABLE_CHANNELS.map((ch) => {
+                    const isSelected = writeChannels.includes(ch.id);
+                    const Icon = ch.icon;
+                    return (
+                      <button
+                        key={ch.id}
+                        type="button"
+                        onClick={() => toggleWriteChannel(ch.id)}
+                        className={`flex items-center gap-2 p-2.5 rounded-md border text-xs font-semibold transition ${
+                          isSelected
+                            ? ch.color
+                            : "border-slate-800 bg-slate-950/40 text-slate-500 hover:border-slate-700 hover:text-slate-300"
+                        }`}
+                      >
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span>{ch.label}</span>
+                        {isSelected && <CheckIcon className="w-3.5 h-3.5 ml-auto" />}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Tone of Voice</label>
+              <div className="sm:col-span-5 space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  Tone
+                </label>
                 <select
-                  value={tone}
-                  onChange={(e) => setTone(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  value={writeTone}
+                  onChange={(e) => setWriteTone(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-xs font-medium text-white focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="casual">Casual & Approachable</option>
-                  <option value="professional">Professional & Authoritative</option>
-                  <option value="enthusiastic">Enthusiastic & High Energy</option>
-                  <option value="witty">Witty & Humorous</option>
-                  <option value="educational">Educational & Actionable</option>
+                  {UNIFIED_TONES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
                 </select>
+                <p className="text-[11px] text-slate-500 leading-tight">
+                  Defaults to your business profile tone.
+                </p>
               </div>
             </div>
 
+            {/* Generate Action Button */}
             <button
-              onClick={handleGenerateCaption}
-              disabled={loading}
-              className="w-full py-2.5 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition flex items-center justify-center gap-2"
+              onClick={handleGeneratePosts}
+              disabled={writeLoading}
+              className="w-full py-3 rounded-md gradient-brand text-white text-xs font-bold hover:opacity-95 transition flex items-center justify-center gap-2 shadow-lg disabled:opacity-60"
             >
-              <SparklesIcon className="w-4 h-4" />
-              <span>{loading ? "Generating Across 3 LLM Providers..." : "Generate Captions with All 3 Models"}</span>
+              {writeLoading ? (
+                <>
+                  <SpinnerIcon className="w-4 h-4 animate-spin" />
+                  <span>Writing posts…</span>
+                </>
+              ) : (
+                <>
+                  <SparklesIcon className="w-4 h-4" />
+                  <span>
+                    Generate Posts ({writeChannels.length}{" "}
+                    {writeChannels.length === 1 ? "Network" : "Networks"})
+                  </span>
+                </>
+              )}
             </button>
 
-            {candidates.length > 0 && (
-              <div className="space-y-3 pt-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                      Compare & Choose Best Candidate
-                    </h3>
-                    <p className="text-[11px] text-slate-400">
-                      Select your preferred generated copy below to apply it to your post draft.
-                    </p>
-                  </div>
-                  <span className="text-[11px] font-medium text-indigo-400">
-                    {candidates.filter((c) => c.status === "success").length} of {candidates.length} models ready
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  {candidates.map((cand, idx) => {
-                    const isSelected = selectedCandidateIndex === idx;
-                    const isSuccess = cand.status === "success" && cand.caption;
-                    const isUnconfigured = cand.status === "not_configured";
-
-                    const providerTheme = {
-                      groq: {
-                        badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-                        accent: "border-emerald-500/40",
-                        icon: "⚡",
-                        name: "Groq",
-                      },
-                      openrouter: {
-                        badge: "bg-purple-500/10 text-purple-400 border-purple-500/30",
-                        accent: "border-purple-500/40",
-                        icon: "🌐",
-                        name: "OpenRouter",
-                      },
-                      gemini: {
-                        badge: "bg-sky-500/10 text-sky-400 border-sky-500/30",
-                        accent: "border-sky-500/40",
-                        icon: "✨",
-                        name: "Google Gemini",
-                      },
-                    }[cand.provider] || {
-                      badge: "bg-indigo-500/10 text-indigo-400 border-indigo-500/30",
-                      accent: "border-indigo-500/40",
-                      icon: "🤖",
-                      name: cand.label || "AI Model",
-                    };
-
-                    const charCount = cand.caption ? cand.caption.length : 0;
-                    const wordCount = cand.caption ? cand.caption.split(/\s+/).filter(Boolean).length : 0;
-
+            {/* Generated Channel Variants View */}
+            {writeVariants.length > 0 && (
+              <div className="mt-6 space-y-4 pt-4 border-t border-slate-800">
+                {/* Channel Switcher */}
+                <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800">
+                  {writeVariants.map((v) => {
+                    const spec = AVAILABLE_CHANNELS.find((c) => c.id === v.channel);
+                    const Icon = spec?.icon || SparklesIcon;
+                    const isActive = activeWriteChannel === v.channel;
                     return (
-                      <div
-                        key={cand.provider || idx}
-                        onClick={() => {
-                          if (isSuccess) {
-                            setSelectedCandidateIndex(idx);
-                            setGeneratedCaption(cand.caption);
-                          }
-                        }}
-                        className={`flex flex-col justify-between p-4 rounded-lg border transition cursor-pointer ${
-                          isSelected && isSuccess
-                            ? "bg-slate-950 border-indigo-500 ring-2 ring-indigo-500/30 shadow-lg"
-                            : isSuccess
-                            ? "bg-slate-950/60 border-slate-800 hover:border-slate-700"
-                            : isUnconfigured
-                            ? "bg-slate-950/30 border-slate-800/60 opacity-70 cursor-not-allowed"
-                            : "bg-rose-950/10 border-rose-900/30 cursor-not-allowed"
+                      <button
+                        key={v.channel}
+                        onClick={() => setActiveWriteChannel(v.channel)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition ${
+                          isActive
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
                         }`}
                       >
-                        <div>
-                          {/* Header */}
-                          <div className="flex items-center justify-between gap-2 mb-2.5 pb-2.5 border-b border-slate-800/80">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="text-sm">{providerTheme.icon}</span>
-                              <span className="text-xs font-bold text-white truncate">
-                                {cand.label || providerTheme.name}
-                              </span>
-                            </div>
-
-                            {isSuccess && (
-                              <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
-                                Ready
-                              </span>
-                            )}
-                            {isUnconfigured && (
-                              <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30">
-                                Unconfigured
-                              </span>
-                            )}
-                            {cand.status === "error" && (
-                              <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-rose-500/10 text-rose-300 border border-rose-500/30">
-                                Error
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Model info & metrics */}
-                          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
-                            <span className="truncate max-w-[140px] font-mono text-[10px] text-slate-500" title={cand.model}>
-                              {cand.model}
-                            </span>
-                            {isSuccess && (
-                              <span>
-                                {wordCount} words • {charCount} chars
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Body Content */}
-                          {isSuccess && (
-                            <div className="p-3 rounded bg-slate-900/80 border border-slate-800/80 text-xs text-slate-200 whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto mb-3">
-                              {cand.caption}
-                            </div>
-                          )}
-
-                          {isUnconfigured && (
-                            <div className="p-3.5 rounded bg-amber-500/5 border border-amber-500/20 text-xs text-amber-200/80 space-y-1 mb-3">
-                              <p className="font-semibold text-amber-300">API Key Not Configured</p>
-                              <p className="text-[11px] text-slate-400">
-                                Set <code className="text-amber-300 font-mono text-[10px]">{cand.provider.toUpperCase()}_API_KEY</code> in <code className="text-slate-300 font-mono text-[10px]">ai-service/.env</code> to enable this model.
-                              </p>
-                            </div>
-                          )}
-
-                          {cand.status === "error" && (
-                            <div className="p-3.5 rounded bg-rose-500/5 border border-rose-500/20 text-xs text-rose-300 space-y-1 mb-3">
-                              <p className="font-semibold">Generation Failed</p>
-                              <p className="text-[11px] text-slate-400 break-words">{cand.error || "Provider error"}</p>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Action buttons */}
-                        {isSuccess && (
-                          <div className="space-y-2 pt-2 border-t border-slate-800/80">
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedCandidateIndex(idx);
-                                  setGeneratedCaption(cand.caption);
-                                }}
-                                className={`flex-1 py-1.5 px-2 rounded text-[11px] font-semibold transition flex items-center justify-center gap-1.5 ${
-                                  isSelected
-                                    ? "bg-indigo-600 text-white"
-                                    : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                                }`}
-                              >
-                                {isSelected ? <CheckIcon className="w-3.5 h-3.5" /> : null}
-                                <span>{isSelected ? "Selected Choice" : "Choose Version"}</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleCopy(cand.caption, idx);
-                                }}
-                                className="py-1.5 px-2.5 rounded text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                                title="Copy to clipboard"
-                              >
-                                {copiedIndex === idx ? "✓ Copied" : "Copy"}
-                              </button>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleApply(cand.caption);
-                              }}
-                              className="w-full py-1.5 rounded text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center justify-center gap-1"
-                            >
-                              <span>Apply to Post Draft ↵</span>
-                            </button>
-                          </div>
+                        <Icon className="w-3.5 h-3.5" />
+                        <span className="capitalize">{v.channel}</span>
+                        {savedVariants[v.channel] && (
+                          <span className="text-[10px] text-emerald-300 font-normal">✓</span>
                         )}
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
 
-                {candidates.some((c) => c.status === "success" && c.caption) && (
-                  <div className="p-3 rounded-lg bg-indigo-950/30 border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="text-xs text-indigo-200">
-                      Currently Selected:{" "}
-                      <span className="font-bold text-white">
-                        {candidates[selectedCandidateIndex]?.label || "Candidate"} (
-                        {candidates[selectedCandidateIndex]?.model || "model"})
-                      </span>
+                {/* Active Channel Variant Card */}
+                {currentWriteVariant && (
+                  <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3.5 shadow-inner">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white capitalize flex items-center gap-1.5">
+                          {currentWriteVariant.channel} Post
+                        </span>
+                        {currentWriteVariant.provider === "template" && (
+                          <span className="text-[10px] px-2 py-0.5 rounded border font-medium bg-amber-950/40 text-amber-300 border-amber-800/60">
+                            Fallback Template
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Character Count shown only when close to limit */}
+                      {currentWriteVariant.charCount > currentWriteVariant.maxChars * 0.85 && (
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-xs font-mono font-medium ${
+                              currentWriteVariant.charCount > currentWriteVariant.maxChars
+                                ? "text-rose-400"
+                                : "text-amber-400"
+                            }`}
+                          >
+                            {currentWriteVariant.charCount} / {currentWriteVariant.maxChars} chars
+                          </span>
+                        </div>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleApply(candidates[selectedCandidateIndex]?.caption || generatedCaption)}
-                      className="px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition flex items-center justify-center gap-1.5"
-                    >
-                      <SparklesIcon className="w-4 h-4" />
-                      <span>Apply Selected Version to Post Draft ↵</span>
-                    </button>
+                    {/* Formatted Copy Preview */}
+                    <div className="p-3.5 rounded bg-slate-900/60 border border-slate-800 text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
+                      {currentWriteVariant.content.body}
+                    </div>
+
+                    {/* Actions: Hashtags, Copy, Use in editor, Save as Draft */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800/60">
+                      <button
+                        onClick={() => handleSuggestHashtagsForVariant(currentWriteVariant, false)}
+                        disabled={suggestingTagsChannel === currentWriteVariant.channel}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
+                      >
+                        {suggestingTagsChannel === currentWriteVariant.channel ? (
+                          <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <span>#</span>
+                        )}
+                        <span>Suggest Hashtags</span>
+                      </button>
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
+                        <button
+                          onClick={() =>
+                            copyText(
+                              currentWriteVariant.content.body,
+                              `write_${currentWriteVariant.channel}`
+                            )
+                          }
+                          className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
+                        >
+                          {copiedKey === `write_${currentWriteVariant.channel}`
+                            ? "Copied!"
+                            : "Copy"}
+                        </button>
+
+                        <button
+                          onClick={() => applyToEditor(currentWriteVariant.content.body)}
+                          className="px-3.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold transition"
+                        >
+                          Use in editor
+                        </button>
+
+                        <button
+                          onClick={() => handleSaveVariantDraft(currentWriteVariant)}
+                          disabled={
+                            savingVariantChannel === currentWriteVariant.channel ||
+                            savedVariants[currentWriteVariant.channel]
+                          }
+                          className="px-3.5 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow disabled:opacity-60 flex items-center gap-1.5"
+                        >
+                          {savingVariantChannel === currentWriteVariant.channel ? (
+                            <>
+                              <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                              <span>Saving…</span>
+                            </>
+                          ) : savedVariants[currentWriteVariant.channel] ? (
+                            <>
+                              <CheckIcon className="w-3.5 h-3.5 text-emerald-300" />
+                              <span>Saved</span>
+                            </>
+                          ) : (
+                            <span>Save as Draft</span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -448,29 +657,341 @@ export function AIModal({ onInsert, initialContent }) {
           </div>
         )}
 
-        {/* Tab 2: Hashtag Generator */}
+        {/* ========================================================= */}
+        {/* TAB 2: REUSE A PAST POST                                  */}
+        {/* ========================================================= */}
+        {activeTab === "repurpose" && (
+          <div className="space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                  Select a Past Published Post
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Select a past post to adapt into fresh updates for your networks.
+                </p>
+              </div>
+
+              {topPosts.length > 0 && (
+                <button
+                  onClick={loadTopPosts}
+                  disabled={loadingTopPosts}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 self-start sm:self-auto"
+                >
+                  <RefreshIcon
+                    className={`w-3.5 h-3.5 ${loadingTopPosts ? "animate-spin" : ""}`}
+                  />
+                  <span>Refresh</span>
+                </button>
+              )}
+            </div>
+
+            {loadingTopPosts ? (
+              <div className="py-12 flex flex-col items-center justify-center text-slate-500 text-xs gap-2">
+                <SpinnerIcon className="w-5 h-5 animate-spin text-indigo-500" />
+                <span>Checking published posts…</span>
+              </div>
+            ) : topPosts.length === 0 ? (
+              <div className="p-8 rounded-lg bg-slate-950 border border-slate-800 text-center space-y-3">
+                <p className="text-xs text-slate-300 font-medium">No published posts yet.</p>
+                <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+                  Once you publish posts to Instagram or Facebook, your top-performing content
+                  will appear here so you can easily turn winning posts into fresh updates.
+                </p>
+                <button
+                  onClick={() => setActiveTab("write")}
+                  className="mt-2 px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
+                >
+                  Write a new post instead
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
+                {topPosts.map((post) => {
+                  const isSelected = selectedTopPost?.id === post.id;
+                  const channelSpec = AVAILABLE_CHANNELS.find((c) => c.id === post.channel);
+                  const Icon = channelSpec?.icon || SparklesIcon;
+                  return (
+                    <div
+                      key={post.id}
+                      onClick={() => setSelectedTopPost(post)}
+                      className={`p-3.5 rounded-lg border text-xs cursor-pointer transition flex flex-col justify-between gap-2.5 ${
+                        isSelected
+                          ? "bg-indigo-950/40 border-indigo-500/70 shadow-md text-white"
+                          : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1.5 font-bold capitalize text-slate-200">
+                            <Icon className="w-3.5 h-3.5" />
+                            {post.channel}
+                          </span>
+                          <span className="text-[10px] text-slate-500 capitalize">{post.status}</span>
+                        </div>
+                        <p className="text-xs font-semibold text-white line-clamp-1">
+                          {post.content?.title || "Untitled Post"}
+                        </p>
+                        <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                          {post.content?.body}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[10px] text-slate-400">
+                        {post.metrics?.hasMetrics ? (
+                          <div className="flex items-center gap-2.5 font-mono">
+                            <span>❤️ {post.metrics.likes}</span>
+                            <span>💬 {post.metrics.comments}</span>
+                            <span>🔁 {post.metrics.shares}</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-500">Published Post</span>
+                        )}
+                        {isSelected && <span className="text-indigo-400 font-bold">Selected ✓</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Repurposing Target Configuration */}
+            {selectedTopPost && topPosts.length > 0 && (
+              <div className="p-4 rounded-lg bg-slate-950/70 border border-slate-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-200">
+                    Reuse Selected Post for Other Networks
+                  </span>
+                  <span className="text-[11px] text-indigo-400">
+                    Source: {selectedTopPost.channel.toUpperCase()}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                  <div className="sm:col-span-8 space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-400">
+                      Target Networks
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {AVAILABLE_CHANNELS.map((ch) => {
+                        const isSelected = repurposeChannels.includes(ch.id);
+                        const Icon = ch.icon;
+                        return (
+                          <button
+                            key={ch.id}
+                            type="button"
+                            onClick={() => toggleRepurposeChannel(ch.id)}
+                            className={`flex items-center gap-2 p-2 rounded border text-xs font-semibold transition ${
+                              isSelected
+                                ? ch.color
+                                : "border-slate-800 bg-slate-900 text-slate-500 hover:text-slate-300"
+                            }`}
+                          >
+                            <Icon className="w-3.5 h-3.5 shrink-0" />
+                            <span className="capitalize">{ch.label}</span>
+                            {isSelected && <CheckIcon className="w-3 h-3 ml-auto" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-4 space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-400">Tone</label>
+                    <select
+                      value={repurposeTone}
+                      onChange={(e) => setRepurposeTone(e.target.value)}
+                      className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      {UNIFIED_TONES.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleRepurposePost}
+                  disabled={repurposingLoading}
+                  className="w-full py-2.5 rounded-md gradient-brand text-white text-xs font-bold hover:opacity-95 transition flex items-center justify-center gap-2 shadow"
+                >
+                  {repurposingLoading ? (
+                    <>
+                      <SpinnerIcon className="w-4 h-4 animate-spin" />
+                      <span>Adapting past post…</span>
+                    </>
+                  ) : (
+                    <>
+                      <SparklesIcon className="w-4 h-4" />
+                      <span>
+                        Reuse Post for {repurposeChannels.length}{" "}
+                        {repurposeChannels.length === 1 ? "Network" : "Networks"}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Repurposed Variants Preview */}
+            {repurposeVariants.length > 0 && (
+              <div className="mt-4 space-y-4 pt-4 border-t border-slate-800">
+                <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800">
+                  {repurposeVariants.map((v) => {
+                    const spec = AVAILABLE_CHANNELS.find((c) => c.id === v.channel);
+                    const Icon = spec?.icon || SparklesIcon;
+                    const isActive = activeRepurposeChannel === v.channel;
+                    return (
+                      <button
+                        key={v.channel}
+                        onClick={() => setActiveRepurposeChannel(v.channel)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition ${
+                          isActive
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span className="capitalize">{v.channel}</span>
+                        {savedRepurposeVariants[v.channel] && (
+                          <span className="text-[10px] text-emerald-300 font-normal">✓</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {currentRepurposeVariant && (
+                  <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3.5 shadow-inner">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white capitalize flex items-center gap-1.5">
+                          {currentRepurposeVariant.channel} Post
+                        </span>
+                        {currentRepurposeVariant.provider === "template" && (
+                          <span className="text-[10px] px-2 py-0.5 rounded border font-medium bg-amber-950/40 text-amber-300 border-amber-800/60">
+                            Fallback Template
+                          </span>
+                        )}
+                      </div>
+
+                      {currentRepurposeVariant.charCount >
+                        currentRepurposeVariant.maxChars * 0.85 && (
+                        <span
+                          className={`text-xs font-mono font-medium ${
+                            currentRepurposeVariant.charCount > currentRepurposeVariant.maxChars
+                              ? "text-rose-400"
+                              : "text-amber-400"
+                          }`}
+                        >
+                          {currentRepurposeVariant.charCount} / {currentRepurposeVariant.maxChars}{" "}
+                          chars
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="p-3.5 rounded bg-slate-900/60 border border-slate-800 text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
+                      {currentRepurposeVariant.content.body}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800/60">
+                      <button
+                        onClick={() =>
+                          handleSuggestHashtagsForVariant(currentRepurposeVariant, true)
+                        }
+                        disabled={suggestingTagsChannel === currentRepurposeVariant.channel}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
+                      >
+                        {suggestingTagsChannel === currentRepurposeVariant.channel ? (
+                          <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <span>#</span>
+                        )}
+                        <span>Suggest Hashtags</span>
+                      </button>
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
+                        <button
+                          onClick={() =>
+                            copyText(
+                              currentRepurposeVariant.content.body,
+                              `repurpose_${currentRepurposeVariant.channel}`
+                            )
+                          }
+                          className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
+                        >
+                          {copiedKey === `repurpose_${currentRepurposeVariant.channel}`
+                            ? "Copied!"
+                            : "Copy"}
+                        </button>
+
+                        <button
+                          onClick={() => applyToEditor(currentRepurposeVariant.content.body)}
+                          className="px-3.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold transition"
+                        >
+                          Use in editor
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            handleSaveRepurposeVariantDraft(currentRepurposeVariant)
+                          }
+                          disabled={
+                            savingRepurposeVariantChannel === currentRepurposeVariant.channel ||
+                            savedRepurposeVariants[currentRepurposeVariant.channel]
+                          }
+                          className="px-3.5 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow disabled:opacity-60 flex items-center gap-1.5"
+                        >
+                          {savingRepurposeVariantChannel === currentRepurposeVariant.channel ? (
+                            <>
+                              <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                              <span>Saving…</span>
+                            </>
+                          ) : savedRepurposeVariants[currentRepurposeVariant.channel] ? (
+                            <>
+                              <CheckIcon className="w-3.5 h-3.5 text-emerald-300" />
+                              <span>Saved</span>
+                            </>
+                          ) : (
+                            <span>Save as Draft</span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* TAB 3: HASHTAGS                                           */}
+        {/* ========================================================= */}
         {activeTab === "hashtags" && (
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">
-                Post Text or Keywords
+                Content or Topic to Analyze
               </label>
               <textarea
-                rows={3}
+                rows={4}
                 value={tagContent}
                 onChange={(e) => setTagContent(e.target.value)}
-                placeholder="Paste your post body or core keywords here to extract relevant hashtags..."
-                className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                placeholder="e.g. Sourdough bread, artisanal bakery, fresh morning croissants, organic wheat..."
+                className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
               />
             </div>
 
             <button
               onClick={handleGenerateHashtags}
-              disabled={loading}
+              disabled={tagLoading}
               className="w-full py-2.5 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition flex items-center justify-center gap-2"
             >
               <SparklesIcon className="w-4 h-4" />
-              <span>{loading ? "Extracting Hashtags..." : "Generate Smart Hashtags"}</span>
+              <span>{tagLoading ? "Analyzing Keywords…" : "Find Hashtags"}</span>
             </button>
 
             {generatedTags.length > 0 && (
@@ -478,7 +999,7 @@ export function AIModal({ onInsert, initialContent }) {
                 <div className="flex items-center justify-between text-xs text-indigo-300 font-semibold">
                   <span>Suggested Hashtags ({generatedTags.length})</span>
                   <button
-                    onClick={() => handleApply(`\n\n${generatedTags.join("")}`)}
+                    onClick={() => applyToEditor(`\n\n${generatedTags.join(" ")}`)}
                     className="px-3 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition"
                   >
                     Append All to Draft
@@ -488,7 +1009,7 @@ export function AIModal({ onInsert, initialContent }) {
                   {generatedTags.map((tag, i) => (
                     <span
                       key={i}
-                      onClick={() => handleApply(` ${tag}`)}
+                      onClick={() => applyToEditor(` ${tag}`)}
                       className="px-2.5 py-1 rounded bg-indigo-950/60 border border-indigo-800 text-indigo-300 text-xs font-medium cursor-pointer hover:bg-indigo-900/80 transition"
                       title="Click to insert"
                     >
@@ -496,79 +1017,6 @@ export function AIModal({ onInsert, initialContent }) {
                     </span>
                   ))}
                 </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tab 3: Omni-Channel Repurposer */}
-        {activeTab === "repurpose" && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                This post was originally written for
-              </label>
-              <div className="flex gap-2">
-                {["instagram", "facebook"].map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setSourcePlatform(p)}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md border text-xs font-semibold capitalize transition ${
-                      sourcePlatform === p
-                        ? "border-indigo-500 bg-indigo-950/40 text-indigo-200"
-                        : "border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200"
-                    }`}
-                  >
-                    {p === "instagram" ? <InstagramIcon className="w-3.5 h-3.5" /> : <FacebookIcon className="w-3.5 h-3.5" />}
-                    {p}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                Original Post Content
-              </label>
-              <textarea
-                rows={3}
-                value={sourceContent}
-                onChange={(e) => setSourceContent(e.target.value)}
-                placeholder="Paste the source post you want to adapt for the other platform..."
-                className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-
-            <button
-              onClick={handleRepurpose}
-              disabled={loading}
-              className="w-full py-2.5 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition flex items-center justify-center gap-2"
-            >
-              <SparklesIcon className="w-4 h-4" />
-              <span>{loading ? "Adapting Content..." : "Repurpose for the Other Platform"}</span>
-            </button>
-
-            {Object.keys(repurposedOutputs).length > 0 && (
-              <div className="space-y-3 mt-4">
-                {Object.entries(repurposedOutputs).map(([plt, text]) => (
-                  <div key={plt} className="p-3.5 rounded-md bg-slate-950 border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span className="capitalize text-indigo-300 flex items-center gap-1.5">
-                        {plt === "instagram" && <InstagramIcon className="w-3.5 h-3.5 text-pink-400" />}
-                        {plt === "facebook" && <FacebookIcon className="w-3.5 h-3.5 text-blue-500" />}
-                        {plt}
-                      </span>
-                      <button
-                        onClick={() => handleApply(text)}
-                        className="px-2.5 py-0.5 rounded bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white text-[11px] transition"
-                      >
-                        Use this
-                      </button>
-                    </div>
-                    <p className="text-xs text-slate-300 whitespace-pre-wrap">{text}</p>
-                  </div>
-                ))}
               </div>
             )}
           </div>

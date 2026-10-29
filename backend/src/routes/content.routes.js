@@ -19,6 +19,7 @@ const upload = multer({
 router.use(requireAuth);
 
 router.get("/", contentController.list);
+router.get("/drafts", contentController.list);
 router.post("/", contentController.create);
 router.post("/media", upload.array("files", 4), contentController.uploadMedia);
 router.get("/:id", contentController.getById);

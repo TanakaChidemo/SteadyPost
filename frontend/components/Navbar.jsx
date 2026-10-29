@@ -78,7 +78,7 @@ export function Navbar() {
             className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border border-purple-500/40 text-purple-200 hover:border-purple-400 text-xs font-medium transition"
           >
             <SparklesIcon className="w-4 h-4 text-purple-400" />
-            <span className="hidden sm:inline">AI Studio</span>
+            <span className="hidden sm:inline">Write with AI</span>
           </button>
         )}
 

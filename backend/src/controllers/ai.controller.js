@@ -1,6 +1,7 @@
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:5001";
 const logger = require("../config/logger");
 const businessProfileModel = require("../models/businessProfile.model");
+const contentAdaptationService = require("../services/contentAdaptation.service");
 
 const PLATFORM_STYLES = {
   twitter: {
@@ -164,4 +165,32 @@ async function repurposeContent(req, res) {
   });
 }
 
-module.exports = { generateCaption, suggestHashtags, repurposeContent };
+async function generateVariants(req, res) {
+  const { idea, topic, channels = ["twitter", "linkedin", "instagram", "facebook"], tone } = req.body;
+  const contentIdea = idea || topic;
+  if (!contentIdea) return res.status(400).json({ error: "idea or topic is required" });
+
+  let effectiveTone = tone;
+  let businessProfile = null;
+  if (req.workspaceId) {
+    businessProfile = await businessProfileModel.findByWorkspaceId(req.workspaceId);
+    if (!effectiveTone && businessProfile?.tone?.length) {
+      effectiveTone = businessProfile.tone[0];
+    }
+  }
+  if (!effectiveTone) effectiveTone = "professional";
+
+  try {
+    const result = await contentAdaptationService.adaptIdeaToChannels({
+      idea: contentIdea,
+      channels,
+      tone: effectiveTone,
+      businessProfile,
+    });
+    return res.json(result);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message });
+  }
+}
+
+module.exports = { generateCaption, suggestHashtags, repurposeContent, generateVariants };
