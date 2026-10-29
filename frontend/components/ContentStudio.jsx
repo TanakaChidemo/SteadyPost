@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAppStore } from "../lib/store";
+import { SignInPrompt } from "./SignInPrompt";
 import { api } from "../lib/apiClient";
 import {
   InstagramIcon,
@@ -35,8 +36,18 @@ function isVideoUrl(url) {
 }
 
 export function ContentStudio() {
-  const { authReady, token, drafts, setDrafts, activeDraft, setActiveDraft, addToast, setAiModalOpen, socialAccounts } =
-    useAppStore();
+  const {
+    authReady,
+    token,
+    user,
+    drafts,
+    setDrafts,
+    activeDraft,
+    setActiveDraft,
+    addToast,
+    setAiModalOpen,
+    socialAccounts,
+  } = useAppStore();
 
   const [title, setTitle] = useState("New Social Campaign");
   const [body, setBody] = useState("");
@@ -73,8 +84,8 @@ export function ContentStudio() {
     null;
 
   useEffect(() => {
-    if (authReady) loadDrafts();
-  }, [authReady, token]);
+    if (authReady && user) loadDrafts();
+  }, [authReady, token, user]);
 
   // Default to every connected account when starting a fresh (non-draft) post.
   useEffect(() => {
@@ -277,6 +288,18 @@ export function ContentStudio() {
   }
 
   const activeMediaUrl = mediaUrls[previewMediaIndex] ?? mediaUrls[0];
+
+  if (!authReady) {
+    return <div className="py-12 text-center text-xs text-slate-500 animate-pulse">Loading studio...</div>;
+  }
+
+  if (!user) {
+    return (
+      <SignInPrompt title="Sign in to create posts">
+        Drafts, AI captions and publishing all belong to a business profile, so you need to be signed in first.
+      </SignInPrompt>
+    );
+  }
 
   return (
     <div className="space-y-6">

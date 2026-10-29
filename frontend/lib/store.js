@@ -17,7 +17,12 @@ export const useAppStore = create((set, get) => ({
   currentWorkspace: null,
   businessProfile: null,
   isBusinessProfileOpen: false,
-  isCreateWorkspaceOpen: false,
+  // Onboarding wizard (#04): null when closed, otherwise { mode } where mode
+  // is "create" (new workspace) or "complete" (finish the current one).
+  onboarding: null,
+  // Workspaces whose onboarding was put off this session, so it doesn't
+  // reopen on every workspace switch.
+  onboardingDismissed: [],
   drafts: [],
   activeDraft: null,
   socialAccounts: [],
@@ -116,6 +121,17 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
+  // Archives the current workspace and moves to the one the server picked.
+  // Throws on failure so the caller can show why.
+  archiveWorkspace: async () => {
+    const { archived, activeWorkspaceId } = await api.workspaces.archiveCurrent();
+    setActiveWorkspaceId(activeWorkspaceId);
+    await get().fetchWorkspaces();
+    api.socialAccounts.list().then((accounts) => set({ socialAccounts: accounts })).catch(() => {});
+    api.content.list().then((drafts) => set({ drafts })).catch(() => {});
+    get().addToast("success", `Archived ${archived.name}`);
+  },
+
   expireSession: () => {
     clearTokens();
     set({ user: null, token: null, workspaces: [], currentWorkspace: null });
@@ -133,14 +149,21 @@ export const useAppStore = create((set, get) => ({
   setActiveDraft: (draft) => set({ activeDraft: draft }),
   setSocialAccounts: (accounts) => set({ socialAccounts: accounts }),
   setBusinessProfileOpen: (open) => set({ isBusinessProfileOpen: open }),
-  setCreateWorkspaceOpen: (open) => set({ isCreateWorkspaceOpen: open }),
+  openOnboarding: (mode) => set({ onboarding: { mode }, isBusinessProfileOpen: false }),
+  closeOnboarding: () => set({ onboarding: null }),
+  dismissOnboarding: (workspaceId) =>
+    set((state) => ({
+      onboarding: null,
+      onboardingDismissed: [...state.onboardingDismissed, workspaceId],
+    })),
 
-  addToast: (type, text) => {
+  // `action` ({ label, onClick }) adds a button; such toasts stay up longer.
+  addToast: (type, text, action) => {
     const id = `toast_${Date.now()}_${Math.random()}`;
-    set((state) => ({ toasts: [...state.toasts, { id, type, text }] }));
+    set((state) => ({ toasts: [...state.toasts, { id, type, text, action }] }));
     setTimeout(() => {
       get().removeToast(id);
-    }, 4000);
+    }, action ? 10000 : 4000);
   },
 
   removeToast: (id) => {

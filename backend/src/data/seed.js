@@ -51,6 +51,7 @@ async function seedDemoData() {
     tone: ["authoritative", "inspiring", "tech-forward"],
     goals: ["brand_awareness", "community_growth"],
     activeChannels: ["instagram", "facebook"],
+    onboardingCompletedAt: new Date(),
   });
 
   await notificationSettingsModel.create({

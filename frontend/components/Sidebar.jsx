@@ -13,10 +13,11 @@ import {
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
 
+// `signIn`: signed out, the link asks you to sign in instead of opening the page.
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Overview", icon: LayersIcon },
-  { href: "/dashboard/content", label: "Content Studio", icon: SparklesIcon, badge: "AI" },
-  { href: "/dashboard/accounts", label: "Social Accounts", icon: UsersIcon },
+  { href: "/dashboard/content", label: "Content Studio", icon: SparklesIcon, badge: "AI", signIn: true },
+  { href: "/dashboard/accounts", label: "Social Accounts", icon: UsersIcon, signIn: true },
 ];
 
 export function Sidebar() {
@@ -24,6 +25,8 @@ export function Sidebar() {
   const {
     authReady,
     token,
+    user,
+    setAuthModalOpen,
     socialAccounts,
     setSocialAccounts,
     currentWorkspace,
@@ -33,12 +36,19 @@ export function Sidebar() {
   // The sidebar is mounted on every dashboard page. Re-fetches social accounts
   // when auth is ready or when the user switches to a different business venture.
   useEffect(() => {
-    if (!authReady) return;
+    if (!authReady || !user) return;
     api.socialAccounts
       .list()
       .then(setSocialAccounts)
       .catch(() => {});
-  }, [authReady, token, currentWorkspace, setSocialAccounts]);
+  }, [authReady, token, user, currentWorkspace, setSocialAccounts]);
+
+  // Opens `action` when signed in; otherwise asks you to sign in.
+  const requireSignIn = (action) => (e) => {
+    if (user) return action?.(e);
+    e.preventDefault();
+    setAuthModalOpen(true);
+  };
 
   const isConnected = (platform) => socialAccounts.some((a) => a.platform === platform);
 
@@ -61,6 +71,7 @@ export function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={item.signIn ? requireSignIn() : undefined}
                   className={`flex items-center justify-between px-3.5 py-2.5 rounded-md text-xs font-medium transition-all ${
                     isActive
                       ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
@@ -82,7 +93,7 @@ export function Sidebar() {
 
             {/* Business Profile Trigger */}
             <button
-              onClick={() => setBusinessProfileOpen(true)}
+              onClick={requireSignIn(() => setBusinessProfileOpen(true))}
               className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-900/80 hover:text-slate-200 transition-all text-left group"
             >
               <div className="flex items-center gap-3">
@@ -102,6 +113,7 @@ export function Sidebar() {
             <span className="text-xs font-semibold text-slate-300">Active Channels</span>
             <Link
               href="/dashboard/accounts"
+              onClick={requireSignIn()}
               className="text-[11px] text-indigo-400 hover:text-indigo-300"
             >
               Manage

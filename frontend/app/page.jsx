@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   SparklesIcon,
   InstagramIcon,
@@ -11,7 +12,26 @@ import {
 import { useAppStore } from "../lib/store";
 
 export default function HomePage() {
-  const { setAuthModalOpen } = useAppStore();
+  const { user, authReady, logout, isAuthModalOpen, setAuthModalOpen } = useAppStore();
+  const router = useRouter();
+  // Where to go once signed in, when a link that needs an account was clicked signed out.
+  const [afterSignIn, setAfterSignIn] = useState(null);
+
+  useEffect(() => {
+    if (user && afterSignIn) router.push(afterSignIn);
+  }, [user, afterSignIn, router]);
+
+  useEffect(() => {
+    // Closing the sign-in box without signing in drops the pending link.
+    if (!isAuthModalOpen && !user) setAfterSignIn(null);
+  }, [isAuthModalOpen, user]);
+
+  function requireSignIn(e) {
+    if (user) return;
+    e.preventDefault();
+    setAfterSignIn(e.currentTarget.getAttribute("href"));
+    setAuthModalOpen(true);
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
@@ -25,12 +45,30 @@ export default function HomePage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setAuthModalOpen(true)}
-            className="text-xs font-semibold text-slate-300 hover:text-white px-3 py-2 transition"
-          >
-            Sign In
-          </button>
+          {/* Nothing until the saved login is checked, so "Sign In" doesn't flash for signed-in users. */}
+          {authReady &&
+            (user ? (
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-indigo-300">
+                  {user.name ? user.name.charAt(0).toUpperCase() : "U"}
+                </div>
+                <span className="hidden sm:inline text-xs font-semibold text-slate-200">{user.name}</span>
+                <button
+                  onClick={logout}
+                  className="text-xs text-slate-400 hover:text-rose-400 px-2 py-1 transition"
+                  title="Sign Out"
+                >
+                  Logout
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAuthModalOpen(true)}
+                className="text-xs font-semibold text-slate-300 hover:text-white px-3 py-2 transition"
+              >
+                Sign In
+              </button>
+            ))}
           <Link
             href="/dashboard"
             className="text-xs font-semibold px-4 py-2 rounded-md gradient-brand text-white hover:opacity-95 transition"
@@ -66,6 +104,7 @@ export default function HomePage() {
           </Link>
           <Link
             href="/dashboard/content"
+            onClick={requireSignIn}
             className="w-full sm:w-auto px-7 py-3.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 font-semibold text-sm transition"
           >
             Try AI Content Studio
@@ -111,7 +150,9 @@ export default function HomePage() {
         <div>© 2026 SteadyPost Platform. All rights reserved.</div>
         <div className="flex items-center gap-4">
           <Link href="/dashboard" className="hover:text-slate-300">Dashboard</Link>
-          <Link href="/dashboard/content" className="hover:text-slate-300">Studio</Link>
+          <Link href="/dashboard/content" onClick={requireSignIn} className="hover:text-slate-300">
+            Studio
+          </Link>
         </div>
       </footer>
     </div>

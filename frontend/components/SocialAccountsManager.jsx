@@ -5,6 +5,7 @@ import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
 import { loadFacebookSdk } from "../lib/facebookSdk";
 import { SetupWalkthroughModal } from "./SetupWalkthroughModal";
+import { SignInPrompt } from "./SignInPrompt";
 import {
   InstagramIcon,
   FacebookIcon,
@@ -59,7 +60,7 @@ const AVAILABLE_CHANNELS = [
 ];
 
 export function SocialAccountsManager() {
-  const { authReady, token, socialAccounts, setSocialAccounts, addToast } = useAppStore();
+  const { authReady, token, user, setAuthModalOpen, socialAccounts, setSocialAccounts, addToast } = useAppStore();
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState("instagram");
@@ -77,10 +78,13 @@ export function SocialAccountsManager() {
   useEffect(() => {
     // Wait for auth to be resolved so this doesn't fire before a restored
     // token is in place and 401 silently, leaving the page stuck on "Inactive".
-    if (authReady) loadAccounts();
-  }, [authReady, token]);
+    if (authReady && user) loadAccounts();
+  }, [authReady, token, user]);
 
   async function handleConnectWithMeta() {
+    // Channels belong to a business profile, so never start Meta's login signed out.
+    if (!user) return setAuthModalOpen(true);
+
     const configId = process.env.NEXT_PUBLIC_META_LOGIN_CONFIG_ID;
     if (!process.env.NEXT_PUBLIC_META_APP_ID || !configId) {
       return addToast("error", "Meta OAuth isn't configured on this server — use the sandbox form below instead.");
@@ -200,6 +204,18 @@ export function SocialAccountsManager() {
     } catch (err) {
       addToast("error", "Failed to disconnect channel");
     }
+  }
+
+  if (!authReady) {
+    return <div className="py-12 text-center text-xs text-slate-500 animate-pulse">Loading channels...</div>;
+  }
+
+  if (!user) {
+    return (
+      <SignInPrompt title="Sign in to connect your channels">
+        Your Facebook and Instagram accounts are linked to a business profile, so you need to be signed in first.
+      </SignInPrompt>
+    );
   }
 
   return (

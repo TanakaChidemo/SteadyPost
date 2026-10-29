@@ -15,7 +15,8 @@ import {
 } from "../../components/Icons";
 
 export default function DashboardOverviewPage() {
-  const { user, authReady, token, drafts, setDrafts, socialAccounts, addToast, setAiModalOpen } = useAppStore();
+  const { user, authReady, token, drafts, setDrafts, socialAccounts, addToast, setAiModalOpen, setAuthModalOpen } =
+    useAppStore();
 
   const [quickPost, setQuickPost] = useState("");
   const [quickPlatform, setQuickPlatform] = useState("instagram");
@@ -24,8 +25,15 @@ export default function DashboardOverviewPage() {
   useEffect(() => {
     // Wait for auth to be resolved (token restored from localStorage) so this
     // doesn't fire before login and silently 401, leaving stats stuck at 0.
-    if (authReady) loadData();
-  }, [authReady, token]);
+    if (authReady && user) loadData();
+  }, [authReady, token, user]);
+
+  // Signed out, links into the studio ask you to sign in instead.
+  function requireSignIn(e) {
+    if (user) return;
+    e.preventDefault();
+    setAuthModalOpen(true);
+  }
 
   async function loadData() {
     try {
@@ -37,6 +45,7 @@ export default function DashboardOverviewPage() {
   }
 
   async function handleQuickPublish() {
+    if (!user) return setAuthModalOpen(true);
     if (!quickPost.trim()) return addToast("error", "Write some text to publish");
     setIsPublishing(true);
     try {
@@ -70,23 +79,28 @@ export default function DashboardOverviewPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">
-            Welcome back, {user?.name || "Tanaka Chidemo"} 👋
+            {user ? `Welcome back, ${user.name} 👋` : "Welcome to SteadyPost"}
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Here is what is happening across your social channels today.
+            {user
+              ? "Here is what is happening across your social channels today."
+              : "Sign in to see what's happening across your social channels."}
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setAiModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-purple-950/60 border border-purple-500/40 text-purple-300 text-xs font-semibold hover:border-purple-400 transition"
-          >
-            <SparklesIcon className="w-4 h-4 text-purple-400" />
-            <span>Write with AI</span>
-          </button>
+          {user && (
+            <button
+              onClick={() => setAiModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-purple-950/60 border border-purple-500/40 text-purple-300 text-xs font-semibold hover:border-purple-400 transition"
+            >
+              <SparklesIcon className="w-4 h-4 text-purple-400" />
+              <span>Write with AI</span>
+            </button>
+          )}
           <Link
             href="/dashboard/content"
+            onClick={requireSignIn}
             className="flex items-center gap-1.5 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
           >
             <PlusIcon className="w-4 h-4" />
@@ -171,6 +185,7 @@ export default function DashboardOverviewPage() {
           <div className="flex items-center justify-between pt-1">
             <Link
               href="/dashboard/content"
+              onClick={requireSignIn}
               className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold"
             >
               Open Full Studio with Live Preview →

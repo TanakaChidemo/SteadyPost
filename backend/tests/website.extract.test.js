@@ -11,6 +11,7 @@ describe("extractProfile", () => {
     expect(result.found).toBe(true);
     expect(result.fields).toEqual({
       name: "Rosie's Bakery",
+      description: null,
       address: {
         streetAddress: "12 Market Street",
         locality: "Leeds",
@@ -80,6 +81,7 @@ describe("extractProfile", () => {
     expect(result.found).toBe(false);
     expect(result.fields).toEqual({
       name: null,
+      description: null,
       address: null,
       hours: null,
       services: null,
@@ -125,6 +127,55 @@ describe("extractProfile", () => {
       extractProfile('<link rel="apple-touch-icon" href="/touch.png">', "https://x.example/").fields.logo
     ).toBe("https://x.example/touch.png");
     expect(extractProfile('<link rel="icon" href="/favicon.ico">', "https://x.example/").fields.logo).toBeNull();
+  });
+
+  describe("description (Offer prefill, #04.1)", () => {
+    const jsonLd = `<script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"OnlineStore","name":"Pastreet",
+       "description":"  Buy from local sellers and collect from a nearby pickup point.  "}</script>`;
+    const og = '<meta property="og:description" content="Local sellers, nearby pickup.">';
+    const meta = '<meta name="description" content="Pastreet: shop local in Harare.">';
+
+    it("reads the schema.org description first, tidying whitespace", () => {
+      const { fields, sources } = extractProfile(jsonLd + og + meta, "https://pastreet.shop/");
+      expect(fields.description).toBe("Buy from local sellers and collect from a nearby pickup point.");
+      expect(sources.description).toBe("json-ld");
+    });
+
+    it("falls back to og:description", () => {
+      const { fields, sources } = extractProfile(og + meta, "https://pastreet.shop/");
+      expect(fields.description).toBe("Local sellers, nearby pickup.");
+      expect(sources.description).toBe("open-graph");
+    });
+
+    it('falls back to <meta name="description">, whatever its case', () => {
+      const { fields, sources } = extractProfile(
+        '<meta name="Description" content="Pastreet: shop local in Harare.">',
+        "https://pastreet.shop/"
+      );
+      expect(fields.description).toBe("Pastreet: shop local in Harare.");
+      expect(sources.description).toBe("html");
+    });
+
+    it("reads a microdata description", () => {
+      const html = `<div itemscope itemtype="https://schema.org/LocalBusiness">
+        <span itemprop="name">Northside Plumbing</span>
+        <p itemprop="description">Boilers fixed fast.</p></div>`;
+      const { fields, sources } = extractProfile(html, "https://northside.example/");
+      expect(fields.description).toBe("Boilers fixed fast.");
+      expect(sources.description).toBe("microdata");
+    });
+
+    it("cuts a very long description at a word, under 1000 characters", () => {
+      const long = `<meta name="description" content="${"word ".repeat(300)}">`;
+      const { description } = extractProfile(long, "https://x.example/").fields;
+      expect(description.length).toBeLessThanOrEqual(1000);
+      expect(description.endsWith("word")).toBe(true);
+    });
+
+    it("counts a page with only a description as found", () => {
+      expect(extractProfile(meta, "https://pastreet.shop/").found).toBe(true);
+    });
   });
 
   it("keeps opening-hours text it can't parse as raw", () => {
