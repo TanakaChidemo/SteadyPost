@@ -190,6 +190,24 @@ export const api = {
     getNotifications: () => apiClient.get("/business-profile/notifications").then((r) => r.data),
     updateNotifications: (data) => apiClient.put("/business-profile/notifications", data).then((r) => r.data),
   },
+  posts: {
+    list: ({ status, campaignId } = {}) =>
+      apiClient.get("/posts", { params: { status, campaignId } }).then((r) => r.data.items || []),
+    getById: (id) => apiClient.get(`/posts/${id}`).then((r) => r.data),
+    create: (data) => apiClient.post("/posts", data).then((r) => r.data),
+    update: (id, data) => apiClient.put(`/posts/${id}`, data).then((r) => r.data),
+    delete: (id) => apiClient.delete(`/posts/${id}`),
+    getTopPerforming: ({ limit = 10, channel, metric = "engagement" } = {}) =>
+      apiClient.get("/posts/top-performing", { params: { limit, channel, metric } }).then((r) => r.data),
+    generateVariants: (data) => apiClient.post("/posts/generate-variants", data).then((r) => r.data),
+    repurposePost: (id, data) => apiClient.post(`/posts/${id}/repurpose`, data).then((r) => r.data),
+    batchCreate: (posts) => apiClient.post("/posts/batch-create", { posts }).then((r) => r.data.items || []),
+    submitApproval: (id, data = {}) => apiClient.post(`/posts/${id}/submit-approval`, data).then((r) => r.data),
+    approve: (id, data = {}) => apiClient.post(`/posts/${id}/approve`, data).then((r) => r.data),
+    requestChanges: (id, data = {}) => apiClient.post(`/posts/${id}/request-changes`, data).then((r) => r.data),
+    publishNow: (id) => apiClient.post(`/posts/${id}/publish-now`).then((r) => r.data),
+    publishApproved: (data = {}) => apiClient.post("/posts/publish-approved", data).then((r) => r.data),
+  },
   website: {
     // Reads a site without saving anything (used before a workspace exists).
     preview: (url) =>
@@ -221,5 +239,6 @@ export const api = {
     generateCaption: (data) => apiClient.post("/ai/generate-caption", data).then((r) => r.data),
     suggestHashtags: (data) => apiClient.post("/ai/suggest-hashtags", data).then((r) => r.data),
     repurpose: (data) => apiClient.post("/ai/repurpose", data).then((r) => r.data),
+    generateVariants: (data) => apiClient.post("/posts/generate-variants", data).then((r) => r.data),
   },
 };

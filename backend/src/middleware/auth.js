@@ -10,7 +10,8 @@ function requireAuth(req, res, next) {
 
   const token = header.split(" ")[1];
   try {
-    const payload = jwt.verify(token, JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
+    const secret = process.env.JWT_ACCESS_SECRET || JWT_ACCESS_SECRET;
+    const payload = jwt.verify(token, secret, { algorithms: ["HS256"] });
     req.user = {
       id: payload.sub,
       email: payload.email,

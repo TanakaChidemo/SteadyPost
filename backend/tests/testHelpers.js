@@ -24,7 +24,14 @@ function createToken(payload) {
 
 async function setupTestDB() {
   if (mongoose.connection.readyState === 0) {
-    const uri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/steadypost_test";
+    let uri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/steadypost_test";
+    if (uri === "memory") {
+      const { MongoMemoryServer } = require("mongodb-memory-server");
+      if (!global.__TEST_MONGOD__) {
+        global.__TEST_MONGOD__ = await MongoMemoryServer.create();
+      }
+      uri = global.__TEST_MONGOD__.getUri();
+    }
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 });
   }
 }
@@ -32,6 +39,10 @@ async function setupTestDB() {
 async function teardownTestDB() {
   if (mongoose.connection.readyState !== 0) {
     await mongoose.disconnect();
+  }
+  if (global.__TEST_MONGOD__) {
+    await global.__TEST_MONGOD__.stop();
+    global.__TEST_MONGOD__ = null;
   }
 }
 
