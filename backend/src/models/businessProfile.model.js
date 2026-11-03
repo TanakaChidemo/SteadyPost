@@ -18,6 +18,13 @@ const businessProfileSchema = new mongoose.Schema(
     tone: { type: [String], default: [] },
     goals: { type: [String], default: [] },
     activeChannels: { type: [String], default: [] },
+    guardrails: {
+      bannedClaims: { type: [String], default: [] },
+      requiredDisclosures: { type: [String], default: [] },
+      toneStrictness: { type: String, enum: ["strict", "moderate", "relaxed"], default: "moderate" },
+      bannedKeywords: { type: [String], default: [] },
+      sensitivitySensitivity: { type: String, enum: ["conservative", "standard", "relaxed"], default: "standard" },
+    },
     // Set when the onboarding wizard is finished (#04). Null means the
     // workspace still needs onboarding; see isOnboardingComplete.
     onboardingCompletedAt: { type: Date, default: null },

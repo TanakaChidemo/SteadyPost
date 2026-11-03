@@ -17,6 +17,7 @@ export function AIModal({ onInsert, initialContent }) {
   const [candidates, setCandidates] = useState([]);
   const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
   const [copiedIndex, setCopiedIndex] = useState(null);
+  const [guardrailsReport, setGuardrailsReport] = useState(null);
 
   // Hashtag state
   const [tagContent, setTagContent] = useState("");
@@ -63,6 +64,7 @@ export function AIModal({ onInsert, initialContent }) {
             ];
 
       setCandidates(rawCandidates);
+      setGuardrailsReport(res.guardrails || null);
 
       const firstSuccessIdx = rawCandidates.findIndex(
         (c) => c.status === "success" && c.caption
@@ -238,6 +240,75 @@ export function AIModal({ onInsert, initialContent }) {
               <SparklesIcon className="w-4 h-4" />
               <span>{loading ? "Generating Across 3 LLM Providers..." : "Generate Captions with All 3 Models"}</span>
             </button>
+
+            {guardrailsReport && (
+              <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-400">🛡️</span>
+                    <span className="font-bold text-white text-xs">Brand Guardrails & Voice Audit (F09)</span>
+                  </div>
+                  <span
+                    className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                      guardrailsReport.passed
+                        ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+                        : "bg-rose-500/10 text-rose-300 border border-rose-500/30"
+                    }`}
+                  >
+                    Score: {guardrailsReport.score}/100 — {guardrailsReport.passed ? "PASSED" : "ISSUES FLAGGED"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
+                  <div className="p-2 rounded bg-slate-900/60 border border-slate-800">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Tone Match</span>
+                    <span className={guardrailsReport.tone?.passed ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>
+                      {guardrailsReport.tone?.passed ? "✓ Aligns with Profile" : "✗ Tone Drift Detected"}
+                    </span>
+                    <span className="text-slate-400 block text-[10px]">
+                      Detected: {guardrailsReport.tone?.detectedTone || "neutral"}
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded bg-slate-900/60 border border-slate-800">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Banned Claims</span>
+                    <span className={guardrailsReport.bannedClaims?.passed ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
+                      {guardrailsReport.bannedClaims?.passed ? "✓ Clean" : `✗ ${guardrailsReport.bannedClaims?.violations?.length} Violation(s)`}
+                    </span>
+                    <span className="text-slate-400 block text-[10px]">
+                      No false guarantees or restricted terms
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded bg-slate-900/60 border border-slate-800">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Disclosures</span>
+                    <span className={guardrailsReport.disclosures?.passed ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>
+                      {guardrailsReport.disclosures?.passed ? "✓ Clean" : "✗ Missing Disclosures"}
+                    </span>
+                    <span className="text-slate-400 block text-[10px]">
+                      Mandatory #ad / #sponsored tags
+                    </span>
+                  </div>
+                </div>
+
+                {guardrailsReport.violations?.length > 0 && (
+                  <div className="p-2 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px] space-y-1">
+                    <span className="font-bold block">Items Requiring Attention:</span>
+                    {guardrailsReport.violations.map((v, i) => (
+                      <div key={i} className="flex items-start gap-1.5">
+                        <span>•</span>
+                        <span>{v.message || v.reason || v.phrase || "Policy violation"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="text-[10px] text-slate-400 flex items-center justify-between border-t border-slate-900 pt-1">
+                  <span>Safety net active: Human approval remains mandatory for all AI drafts.</span>
+                  <span className="text-indigo-400 font-medium">Owner Sign-off Required</span>
+                </div>
+              </div>
+            )}
 
             {candidates.length > 0 && (
               <div className="space-y-3 pt-2">

@@ -1,0 +1,422 @@
+[
+  {
+    "id": "sens_01",
+    "topic": "Deadly 7.8 magnitude earthquake strikes eastern province",
+    "snippet": "Emergency responders search for survivors as death toll rises past 400 with hundreds still trapped in collapsed buildings.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "sens_02",
+    "topic": "Devastating wildfire displaces thousands of residents",
+    "snippet": "High winds fuel rapid spread of flames, destroying over 200 homes with multiple fatalities reported by fire officials.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "sens_03",
+    "topic": "Catastrophic flood death toll rises across river basin",
+    "snippet": "Torrential monsoon rains cause river banks to overflow, leaving dozens dead and entire villages submerged.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "sens_04",
+    "topic": "Massive tsunami destroys coastal villages after undersea quake",
+    "snippet": "Giant waves sweep through populated coastal towns, leaving immense destruction and scores of casualties.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "sens_05",
+    "topic": "Fatal hurricane causes catastrophic storm surge",
+    "snippet": "Category 5 storm makes landfall, leaving 18 dead and catastrophic structural failure across barrier islands.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "sens_06",
+    "topic": "Mass shooting at downtown festival leaves 12 dead",
+    "snippet": "Police apprehend suspect after horrific gunfire outbreak during outdoor music event.",
+    "isSensitive": true,
+    "category": "mass_casualty_violence"
+  },
+  {
+    "id": "sens_07",
+    "topic": "Terrorist attack targeting subway station kills 14",
+    "snippet": "Transit hub cordoned off following fatal blast; emergency trauma teams treat dozens of injured commuters.",
+    "isSensitive": true,
+    "category": "mass_casualty_violence"
+  },
+  {
+    "id": "sens_08",
+    "topic": "Suicide bombing near government building causes widespread casualties",
+    "snippet": "Security forces declare high alert after devastating explosion kills 22 and wounds over 50.",
+    "isSensitive": true,
+    "category": "mass_casualty_violence"
+  },
+  {
+    "id": "sens_09",
+    "topic": "Fatal plane crash in mountainous terrain with zero survivors",
+    "snippet": "Commercial flight carrying 64 passengers crashes during storm approach; search and rescue teams locate wreckage.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "sens_10",
+    "topic": "Deadly train derailment kills at least 25 passengers",
+    "snippet": "High-speed rail cars leave tracks near junction, trapping hundreds under twisted steel.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "sens_11",
+    "topic": "Deadly explosion at chemical plant leaves workers dead and injured",
+    "snippet": "Industrial facility fire triggers massive secondary blast, killing 8 technicians on duty.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "sens_12",
+    "topic": "Building collapse leaves scores dead and trapped beneath rubble",
+    "snippet": "Unpermitted residential tower crumbles overnight; urban search teams work tirelessly amid the debris.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "sens_13",
+    "topic": "Highway pileup in dense fog leaves multiple fatalities",
+    "snippet": "Over 40 vehicles collide in blinding morning fog; state troopers confirm 6 killed on interstate.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "sens_14",
+    "topic": "Beloved film icon passes away at 54 after sudden illness",
+    "snippet": "Tributes pour in from across the globe as family announces the tragic death of the award-winning actor.",
+    "isSensitive": true,
+    "category": "bereavement_death"
+  },
+  {
+    "id": "sens_15",
+    "topic": "Nation mourns the loss of legendary community leader",
+    "snippet": "Flags lowered to half-mast following the tragic passing of civil rights pioneer at age 82.",
+    "isSensitive": true,
+    "category": "bereavement_death"
+  },
+  {
+    "id": "sens_16",
+    "topic": "Tragic death of teenage athlete ruled as suicide",
+    "snippet": "High school district provides grief counseling services following sudden loss of varsity captain.",
+    "isSensitive": true,
+    "category": "bereavement_death"
+  },
+  {
+    "id": "sens_17",
+    "topic": "Funeral services announced for firefighter killed in line of duty",
+    "snippet": "Community honors fallen hero who died while rescuing children from residential blaze.",
+    "isSensitive": true,
+    "category": "bereavement_death"
+  },
+  {
+    "id": "sens_18",
+    "topic": "Renowned musician found dead in hotel room",
+    "snippet": "Coroner office launches toxicology investigation following tragic death of Grammy-winning producer.",
+    "isSensitive": true,
+    "category": "bereavement_death"
+  },
+  {
+    "id": "sens_19",
+    "topic": "Missile strike kills 15 civilians in border village",
+    "snippet": "International monitors document devastating civilian casualties amid escalating military bombardment.",
+    "isSensitive": true,
+    "category": "war_armed_conflict"
+  },
+  {
+    "id": "sens_20",
+    "topic": "Shelling of civilians condemned as potential war crimes",
+    "snippet": "Humanitarian corridors cut off as residential quarters endure heavy artillery barrage with civilian casualties.",
+    "isSensitive": true,
+    "category": "war_armed_conflict"
+  },
+  {
+    "id": "sens_21",
+    "topic": "Military invasion displaces over one million refugees",
+    "snippet": "Border crossings overwhelmed as families flee advancing forces amidst heavy gunfire and casualties.",
+    "isSensitive": true,
+    "category": "war_armed_conflict"
+  },
+  {
+    "id": "sens_22",
+    "topic": "Federal indictment charges executives in child abuse and exploitation ring",
+    "snippet": "Law enforcement agencies announce sweeping arrests in horrifying multi-state criminal investigation.",
+    "isSensitive": true,
+    "category": "scandal_abuse"
+  },
+  {
+    "id": "sens_23",
+    "topic": "Sexual assault allegations rock prominent university athletic department",
+    "snippet": "Independent audit reveals widespread cover-up of misconduct by athletic staff over a decade.",
+    "isSensitive": true,
+    "category": "scandal_abuse"
+  },
+  {
+    "id": "sens_24",
+    "topic": "Human trafficking bust rescues 30 victims from illicit network",
+    "snippet": "Undercover operation dismantles cross-border trafficking syndicate operating out of commercial warehouses.",
+    "isSensitive": true,
+    "category": "scandal_abuse"
+  },
+  {
+    "id": "sens_25",
+    "topic": "Violent riots break out in capital city, 6 killed",
+    "snippet": "Protesters clash with riot police; downtown commercial storefronts torched overnight.",
+    "isSensitive": true,
+    "category": "civil_unrest"
+  },
+  {
+    "id": "sens_26",
+    "topic": "Martial law declared after violent clashes leave several dead",
+    "snippet": "Government imposes indefinite curfew following armed clashes between security forces and demonstrators.",
+    "isSensitive": true,
+    "category": "civil_unrest"
+  },
+  {
+    "id": "sens_27",
+    "topic": "Fatal stabbing spree at shopping center leaves 5 dead",
+    "snippet": "Heroic bystanders intervene to subdue attacker before armed police arrive on scene.",
+    "isSensitive": true,
+    "category": "mass_casualty_violence"
+  },
+  {
+    "id": "sens_28",
+    "topic": "Deadly tornado flattens rural town, 14 confirmed fatalities",
+    "snippet": "Severe weather system tears two-mile swath of destruction through residential neighborhoods.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "sens_29",
+    "topic": "Ferry capsizes in heavy seas with 45 passengers dead",
+    "snippet": "Coast guard naval vessels recover bodies from overturned vessel in treacherous waters.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "sens_30",
+    "topic": "Hospital oxygen tank explosion leaves 19 patients dead",
+    "snippet": "Intensive care unit catches fire following catastrophic valve rupture during night shift.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "safe_01",
+    "topic": "This new productivity app is completely killing it on ProductHunt",
+    "snippet": "Founders share their journey to 10k daily active users within three weeks of initial launch.",
+    "isSensitive": false,
+    "category": "business_tech"
+  },
+  {
+    "id": "safe_02",
+    "topic": "5 killer marketing strategies to double your lead flow in Q4",
+    "snippet": "Proven frameworks for solo founders looking to build evergreen inbound demand.",
+    "isSensitive": false,
+    "category": "business_marketing"
+  },
+  {
+    "id": "safe_03",
+    "topic": "Our team just launched a free crash course in social media storytelling",
+    "snippet": "Learn how to structure compelling carousel posts and hooks in under 30 minutes.",
+    "isSensitive": false,
+    "category": "education"
+  },
+  {
+    "id": "safe_04",
+    "topic": "This autumn pumpkin spice cheesecake recipe is honestly to die for",
+    "snippet": "Baking step-by-step instructions with brown butter crust and caramel glaze.",
+    "isSensitive": false,
+    "category": "food_lifestyle"
+  },
+  {
+    "id": "safe_05",
+    "topic": "Drop dead gorgeous office makeover ideas for small studios",
+    "snippet": "Transform your work-from-home setup with warm lighting, ergonomic shelving, and greenery.",
+    "isSensitive": false,
+    "category": "design_lifestyle"
+  },
+  {
+    "id": "safe_06",
+    "topic": "Why viral meme formats are dominating brand awareness this month",
+    "snippet": "Case study analyzing how small retail brands repurpose trending audio for engagement.",
+    "isSensitive": false,
+    "category": "social_media"
+  },
+  {
+    "id": "safe_07",
+    "topic": "Our product launch received a bomb review from TechCrunch",
+    "snippet": "The tech publication praised our intuitive dashboard and zero-configuration workflows.",
+    "isSensitive": false,
+    "category": "business_tech"
+  },
+  {
+    "id": "safe_08",
+    "topic": "We were bombarded with positive customer feedback after yesterday's webinar",
+    "snippet": "Over 200 founders joined the live session on client retention and onboarding.",
+    "isSensitive": false,
+    "category": "community"
+  },
+  {
+    "id": "safe_09",
+    "topic": "Local salon owner is slaying the wedding makeup game this season",
+    "snippet": "Client spotlights showcasing natural glowing bridal looks and timeless aesthetics.",
+    "isSensitive": false,
+    "category": "beauty_lifestyle"
+  },
+  {
+    "id": "safe_10",
+    "topic": "The entire team is fired up for next week's annual conference",
+    "snippet": "Keynotes, interactive workshops, and networking sessions kicking off Monday.",
+    "isSensitive": false,
+    "category": "events"
+  },
+  {
+    "id": "safe_11",
+    "topic": "Python 3.13 released with experimental free-threading features",
+    "snippet": "New release delivers enhanced performance, cleaner syntax error messages, and better typing.",
+    "isSensitive": false,
+    "category": "tech_software"
+  },
+  {
+    "id": "safe_12",
+    "topic": "Top 10 Chrome extensions for busy freelance consultants",
+    "snippet": "Streamline time tracking, note taking, and proposal drafts directly from your browser.",
+    "isSensitive": false,
+    "category": "productivity"
+  },
+  {
+    "id": "safe_13",
+    "topic": "How vector databases improve semantic search relevance in web apps",
+    "snippet": "Technical overview explaining embeddings, cosine similarity, and low-latency retrieval.",
+    "isSensitive": false,
+    "category": "tech_engineering"
+  },
+  {
+    "id": "safe_14",
+    "topic": "10 creative DIY Halloween costume ideas for solopreneurs",
+    "snippet": "Fun, lighthearted ways to celebrate the holiday with your remote team or clients.",
+    "isSensitive": false,
+    "category": "seasonal_holiday"
+  },
+  {
+    "id": "safe_15",
+    "topic": "Thanksgiving dinner table styling tips for cozy autumn gatherings",
+    "snippet": "Simple linen arrangements, candles, and handmade place cards that impress guests.",
+    "isSensitive": false,
+    "category": "seasonal_holiday"
+  },
+  {
+    "id": "safe_16",
+    "topic": "Preparing your retail shop for the Black Friday and Cyber Monday rush",
+    "snippet": "Inventory checklists, discount strategies, and email campaigns to prep in advance.",
+    "isSensitive": false,
+    "category": "business_retail"
+  },
+  {
+    "id": "safe_17",
+    "topic": "Spring flower trends: best perennials to plant this weekend",
+    "snippet": "Hardy blooms that thrive in full sun with minimal maintenance required.",
+    "isSensitive": false,
+    "category": "gardening_lifestyle"
+  },
+  {
+    "id": "safe_18",
+    "topic": "Healthy meal prep hacks for busy working parents",
+    "snippet": "Save 5 hours a week with batch sheet-pan dinners and make-ahead breakfast parfaits.",
+    "isSensitive": false,
+    "category": "wellness_food"
+  },
+  {
+    "id": "safe_19",
+    "topic": "How to audit your business profile for better local Google ranking",
+    "snippet": "Step-by-step walkthrough covering categories, photos, opening hours, and review velocity.",
+    "isSensitive": false,
+    "category": "local_seo"
+  },
+  {
+    "id": "safe_20",
+    "topic": "Creating a high-converting lead magnet in 3 simple steps",
+    "snippet": "Turn your expertise into a one-page cheat sheet that grows your email newsletter list.",
+    "isSensitive": false,
+    "category": "marketing"
+  },
+  {
+    "id": "safe_21",
+    "topic": "The power of customer testimonials in B2B referral marketing",
+    "snippet": "Why authentic client stories close sales faster than corporate slide decks.",
+    "isSensitive": false,
+    "category": "sales"
+  },
+  {
+    "id": "safe_22",
+    "topic": "3 reasons consistent weekly scheduling beats sporadic posting",
+    "snippet": "Data from 500 creator accounts shows steady distribution maximizes algorithmic reach.",
+    "isSensitive": false,
+    "category": "social_strategy"
+  },
+  {
+    "id": "safe_23",
+    "topic": "Effective hashtag strategies for boutique bakeries on Instagram",
+    "snippet": "Target local foodies and custom cake shoppers using geo-tagged community tags.",
+    "isSensitive": false,
+    "category": "social_tactics"
+  },
+  {
+    "id": "safe_24",
+    "topic": "Sourdough starter maintenance guide for beginners",
+    "snippet": "How to feed, store, and revive your starter for artisan bread with perfect crumb structure.",
+    "isSensitive": false,
+    "category": "baking_food"
+  },
+  {
+    "id": "safe_25",
+    "topic": "Artisanal coffee brewing methods compared: Pour over vs French press",
+    "snippet": "Understanding extraction time, grind size, and water temperature for optimal flavor.",
+    "isSensitive": false,
+    "category": "coffee_lifestyle"
+  },
+  {
+    "id": "safe_26",
+    "topic": "Local high school basketball team celebrates championship victory",
+    "snippet": "Unbeaten squad takes home the state trophy in dramatic overtime thriller.",
+    "isSensitive": false,
+    "category": "sports"
+  },
+  {
+    "id": "safe_27",
+    "topic": "Weekend hiking trails to explore near the city",
+    "snippet": "Scenic ridge loops and waterfall paths ideal for brisk morning walks and trail runs.",
+    "isSensitive": false,
+    "category": "outdoor_lifestyle"
+  },
+  {
+    "id": "safe_28",
+    "topic": "Minimalist home workspace essentials for remote workers",
+    "snippet": "Declutter your desk with cable organizers, monitor arms, and ambient desk mats.",
+    "isSensitive": false,
+    "category": "productivity_design"
+  },
+  {
+    "id": "safe_29",
+    "topic": "Why customer service response time is your biggest competitive advantage",
+    "snippet": "Small businesses that reply within 15 minutes convert 3x more social inquiries into bookings.",
+    "isSensitive": false,
+    "category": "customer_experience"
+  },
+  {
+    "id": "safe_30",
+    "topic": "Podcast recommendations for aspiring bootstrapped founders",
+    "snippet": "In-depth founder interviews covering early traction, pricing experiments, and product-market fit.",
+    "isSensitive": false,
+    "category": "podcasts_business"
+  }
+]

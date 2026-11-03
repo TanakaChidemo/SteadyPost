@@ -1,6 +1,7 @@
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:5001";
 const logger = require("../config/logger");
 const businessProfileModel = require("../models/businessProfile.model");
+const guardrailsService = require("../services/guardrails/guardrailsService");
 
 const PLATFORM_STYLES = {
   twitter: {
@@ -80,22 +81,35 @@ async function generateCaption(req, res) {
     userId: req.user.id,
   });
 
-  if (aiResult) return res.json(aiResult);
-
   const style = PLATFORM_STYLES[platform] || PLATFORM_STYLES.instagram;
-  const caption = style.format(topic, effectiveTone);
+  const localCaption = style.format(topic, effectiveTone);
+  const captionText = aiResult ? aiResult.caption : localCaption;
+
+  const guardrails = await guardrailsService.auditDraft({
+    content: captionText || "",
+    channel: platform,
+    workspaceId: req.workspaceId,
+  });
+
+  if (aiResult) {
+    return res.json({
+      ...aiResult,
+      guardrails,
+    });
+  }
 
   return res.json({
     platform,
-    caption,
+    caption: localCaption,
     model: "steadypost-ai-engine-v2",
     tone,
+    guardrails,
     candidates: [
       {
         provider: "local",
         label: "SteadyPost Fallback Engine",
         model: "steadypost-ai-engine-v2",
-        caption,
+        caption: localCaption,
         status: "success",
         error: null,
       },
@@ -142,25 +156,38 @@ async function repurposeContent(req, res) {
     userId: req.user.id,
   });
 
-  if (aiResult) return res.json(aiResult);
+  let activeRepurposed = aiResult?.repurposed;
+  if (!activeRepurposed) {
+    activeRepurposed = {};
+    targetPlatforms.forEach((target) => {
+      if (target === "twitter") {
+        activeRepurposed[target] = content.length > 270 ? `${content.slice(0, 260)}... #Tech` : content;
+      } else if (target === "linkedin") {
+        activeRepurposed[target] = `Insight: ${content}\n\nHere is what this means for founders and teams looking to scale efficiency in 2026.\n\n#Leadership #Innovation #Growth`;
+      } else if (target === "instagram") {
+        activeRepurposed[target] = `✨ ${content}\n\nSwipe to see more insights! 👉\n\n#CreatorLife #DigitalGrowth #Motivation #Strategy`;
+      } else if (target === "facebook") {
+        activeRepurposed[target] = `${content}\n\nWhat are your thoughts on this? Let us know in the comments below! 👇`;
+      } else {
+        activeRepurposed[target] = content;
+      }
+    });
+  }
 
-  const repurposed = {};
-  targetPlatforms.forEach((target) => {
-    if (target === "twitter") {
-      repurposed[target] = content.length > 270 ? `${content.slice(0, 260)}... #Tech` : content;
-    } else if (target === "linkedin") {
-      repurposed[target] = `Insight: ${content}\n\nHere is what this means for founders and teams looking to scale efficiency in 2026.\n\n#Leadership #Innovation #Growth`;
-    } else if (target === "instagram") {
-      repurposed[target] = `✨ ${content}\n\nSwipe to see more insights! 👉\n\n#CreatorLife #DigitalGrowth #Motivation #Strategy`;
-    } else if (target === "facebook") {
-      repurposed[target] = `${content}\n\nWhat are your thoughts on this? Let us know in the comments below! 👇`;
-    }
-  });
+  const guardrails = {};
+  for (const [target, text] of Object.entries(activeRepurposed)) {
+    guardrails[target] = await guardrailsService.auditDraft({
+      content: text || "",
+      channel: target,
+      workspaceId: req.workspaceId,
+    });
+  }
 
   return res.json({
     sourcePlatform,
-    repurposed,
-    model: "steadypost-ai-engine-v2",
+    repurposed: activeRepurposed,
+    guardrails,
+    model: aiResult?.model || "steadypost-ai-engine-v2",
   });
 }
 

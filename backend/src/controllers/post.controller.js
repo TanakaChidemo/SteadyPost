@@ -4,6 +4,7 @@ const approvalEventModel = require("../models/approvalEvent.model");
 const predictionRecordModel = require("../models/predictionRecord.model");
 const postMetricsModel = require("../models/postMetrics.model");
 const { enqueuePublishJob } = require("../queue");
+const guardrailsService = require("../services/guardrails/guardrailsService");
 
 const createPostSchema = z.object({
   title: z.string().optional(),
@@ -43,6 +44,14 @@ async function create(req, res) {
     aiMetadata = {},
   } = parsed.data;
 
+  const guardrails = await guardrailsService.auditDraft({
+    content: body,
+    channel,
+    mediaUrls,
+    hashtags,
+    workspaceId: req.workspaceId,
+  });
+
   const post = await postModel.create({
     workspaceId: req.workspaceId,
     authorId: req.user.id,
@@ -53,7 +62,10 @@ async function create(req, res) {
     status: "draft",
     scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
     origin,
-    aiMetadata,
+    aiMetadata: {
+      ...aiMetadata,
+      guardrails,
+    },
     versions: [{ body, editedAt: new Date(), editedBy: req.user.id }],
   });
 
@@ -111,6 +123,22 @@ async function update(req, res) {
       });
       updates.versions = versions;
     }
+  }
+
+  if (updates.content || updates.channel) {
+    const updatedContent = updates.content || post.content || {};
+    const updatedChannel = updates.channel || post.channel || "instagram";
+    const guardrails = await guardrailsService.auditDraft({
+      content: updatedContent.body || "",
+      channel: updatedChannel,
+      mediaUrls: updatedContent.mediaUrls || [],
+      hashtags: updatedContent.hashtags || [],
+      workspaceId: req.workspaceId,
+    });
+    updates.aiMetadata = {
+      ...(post.aiMetadata || {}),
+      guardrails,
+    };
   }
 
   const updated = await postModel.updateById(post.id, updates);
