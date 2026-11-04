@@ -9,15 +9,18 @@ import {
   UsersIcon,
   InstagramIcon,
   FacebookIcon,
+  TeamIcon,
 } from "./Icons";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
+import { can } from "../lib/roles";
 
 // `signIn`: signed out, the link asks you to sign in instead of opening the page.
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Overview", icon: LayersIcon },
   { href: "/dashboard/content", label: "Content Studio", icon: SparklesIcon, badge: "AI", signIn: true },
   { href: "/dashboard/accounts", label: "Social Accounts", icon: UsersIcon, signIn: true },
+  { href: "/dashboard/team", label: "Team", icon: TeamIcon, signIn: true },
 ];
 
 export function Sidebar() {
@@ -91,7 +94,8 @@ export function Sidebar() {
               );
             })}
 
-            {/* Business Profile Trigger */}
+            {/* Business Profile Trigger: only for people who can edit it */}
+            {(!user || can(currentWorkspace, "profile.update")) && (
             <button
               onClick={requireSignIn(() => setBusinessProfileOpen(true))}
               className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-md text-xs font-medium text-slate-400 hover:bg-slate-900/80 hover:text-slate-200 transition-all text-left group"
@@ -104,6 +108,7 @@ export function Sidebar() {
                 Setup
               </span>
             </button>
+            )}
           </nav>
         </div>
 
