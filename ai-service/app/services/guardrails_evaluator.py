@@ -22,40 +22,72 @@ BENIGN_IDIOMS = [
 SENSITIVE_PATTERNS = [
     {
         "category": "tragedy_natural_disaster",
-        "pattern": r"\b(?:earthquake|tsunami|hurricane|tornado|wildfire|cyclone|landslide|devastating\s+flood)\b.*?\b(?:devastat(?:ed|ing)|death\s*toll|casualties|displaced|destroyed|victims?|survivors?|catastroph(?:e|ic))\b",
-        "pattern_short": r"\b(?:deadly\s+earthquake|fatal\s+hurricane|massive\s+tsunami|devastating\s+wildfire|catastrophic\s+flood)\b",
+        "pattern": (
+            r"\b(?:earthquake|tsunami|hurricane|tornado|wildfire|cyclone|landslide|"
+            r"devastating\s+flood)\b.*?\b(?:devastat(?:ed|ing)|death\s*toll|casualties|"
+            r"displaced|destroyed|victims?|survivors?|catastroph(?:e|ic))\b"
+        ),
+        "pattern_short": (
+            r"\b(?:deadly\s+earthquake|fatal\s+hurricane|massive\s+tsunami|"
+            r"devastating\s+wildfire|catastrophic\s+flood)\b"
+        ),
         "reason": "Natural disaster with casualties or humanitarian emergency.",
     },
     {
         "category": "mass_casualty_violence",
-        "pattern": r"\b(?:mass\s+shooting|terrorist\s+attack|bombing|airstrike|hostage\s+crisis|fatal\s+stabbing|suicide\s+bombing)\b",
+        "pattern": (
+            r"\b(?:mass\s+shooting|terrorist\s+attack|bombing|airstrike|"
+            r"hostage\s+crisis|fatal\s+stabbing|suicide\s+bombing)\b"
+        ),
         "reason": "Violent incident or mass casualty event.",
     },
     {
         "category": "fatal_accident",
-        "pattern": r"\b(?:plane\s+crash|flight\s+crash|train\s+derailment|fatal\s+pileup|deadly\s+explosion|building\s+collapse)\b.*?\b(?:kills?|killed|deaths?|dead|fatalities|casualties)\b",
-        "pattern_short": r"\b(?:fatal\s+(?:plane\s+crash|explosion|crash)|deadly\s+(?:train\s+derailment|collapse))\b",
+        "pattern": (
+            r"\b(?:plane\s+crash|flight\s+crash|train\s+derailment|fatal\s+pileup|"
+            r"deadly\s+explosion|building\s+collapse)\b.*?\b"
+            r"(?:kills?|killed|deaths?|dead|fatalities|casualties)\b"
+        ),
+        "pattern_short": (
+            r"\b(?:fatal\s+(?:plane\s+crash|explosion|crash)|"
+            r"deadly\s+(?:train\s+derailment|collapse))\b"
+        ),
         "reason": "Fatal transportation or industrial catastrophe.",
     },
     {
         "category": "bereavement_death",
-        "pattern": r"\b(?:tragic\s+death|mourns?\s+the\s+loss|passes?\s+away\s+at|found\s+dead\s+in|suicide\s+death|obituary\s+for|funeral\s+services?)\b",
-        "pattern_short": r"\b(?:mourns?\s+(?:death|loss)|passed\s+away\s+after\s+battle|tragically\s+died)\b",
+        "pattern": (
+            r"\b(?:tragic\s+death|mourns?\s+the\s+loss|passes?\s+away\s+at|"
+            r"found\s+dead\s+in|suicide\s+death|obituary\s+for|funeral\s+services?)\b"
+        ),
+        "pattern_short": (
+            r"\b(?:mourns?\s+(?:death|loss)|passed\s+away\s+after\s+battle|"
+            r"tragically\s+died)\b"
+        ),
         "reason": "Grief, obituary, or death of a public figure.",
     },
     {
         "category": "war_armed_conflict",
-        "pattern": r"\b(?:war\s+crimes?|civilian\s+casualties|military\s+invasion|shelling\s+of\s+civilians|missile\s+strike\s+kills)\b",
+        "pattern": (
+            r"\b(?:war\s+crimes?|civilian\s+casualties|military\s+invasion|"
+            r"shelling\s+of\s+civilians|missile\s+strike\s+kills)\b"
+        ),
         "reason": "Active war, civilian casualties, or military hostilities.",
     },
     {
         "category": "scandal_abuse",
-        "pattern": r"\b(?:child\s+(?:abuse|exploitation)|sexual\s+assault\s+allegations|human\s+trafficking\s+bust)\b",
+        "pattern": (
+            r"\b(?:child\s+(?:abuse|exploitation)|sexual\s+assault\s+allegations|"
+            r"human\s+trafficking\s+bust)\b"
+        ),
         "reason": "Severe criminal controversy or abuse allegations.",
     },
     {
         "category": "civil_unrest",
-        "pattern": r"\b(?:violent\s+riots?|martial\s+law\s+declared|violent\s+clashes\s+leave\s+(?:\d+|several)\s+dead)\b",
+        "pattern": (
+            r"\b(?:violent\s+riots?|martial\s+law\s+declared|"
+            r"violent\s+clashes\s+leave\s+(?:\d+|several)\s+dead)\b"
+        ),
         "reason": "Violent civil unrest or state of emergency.",
     },
 ]
@@ -101,7 +133,9 @@ def _get_llm_client():
     return None, None
 
 
-def screen_sensitivity(topic: str, snippet: str = "", sensitivity_level: str = "standard") -> dict:
+def screen_sensitivity(
+    topic: str, snippet: str = "", sensitivity_level: str = "standard"
+) -> dict:
     full_text = " — ".join(part for part in [topic, snippet] if part).strip()
     if not full_text:
         return {"isSensitive": False, "category": None, "confidence": 0.0, "reason": None}
@@ -113,9 +147,10 @@ def screen_sensitivity(topic: str, snippet: str = "", sensitivity_level: str = "
 
     # 1. Rule-based evaluation
     for item in SENSITIVE_PATTERNS:
-        if re.search(item["pattern"], cleaned, flags=re.IGNORECASE) or (
-            item.get("pattern_short") and re.search(item["pattern_short"], cleaned, flags=re.IGNORECASE)
-        ):
+        has_short = item.get("pattern_short") and re.search(
+            item["pattern_short"], cleaned, flags=re.IGNORECASE
+        )
+        if re.search(item["pattern"], cleaned, flags=re.IGNORECASE) or has_short:
             return {
                 "isSensitive": True,
                 "category": item["category"],
@@ -124,7 +159,11 @@ def screen_sensitivity(topic: str, snippet: str = "", sensitivity_level: str = "
             }
 
     # Casualty regex (e.g. "12 killed", "hundreds dead")
-    casualty_match = re.search(r"\b(?:\d+|dozens?|scores?)\s+(?:killed|dead|injured|slain)\b", cleaned, flags=re.IGNORECASE)
+    casualty_match = re.search(
+        r"\b(?:\d+|dozens?|scores?)\s+(?:killed|dead|injured|slain)\b",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     if casualty_match:
         return {
             "isSensitive": True,
@@ -138,9 +177,10 @@ def screen_sensitivity(topic: str, snippet: str = "", sensitivity_level: str = "
     if client:
         try:
             prompt = (
-                "You are a brand safety filter for social media. Determine if the following trend topic/news "
-                "involves a real-world tragedy, natural disaster, death/casualty, armed conflict, severe scandal, "
-                "or crisis that would make marketing or commercial posts insensitive or tone-deaf.\n\n"
+                "You are a brand safety filter for social media. Determine if the following "
+                "trend topic/news involves a real-world tragedy, natural disaster, death/casualty, "
+                "armed conflict, severe scandal, or crisis that would make marketing or "
+                "commercial posts insensitive or tone-deaf.\n\n"
                 f"Topic: {full_text}\n\n"
                 "Respond strictly in JSON format:\n"
                 '{"isSensitive": boolean, "category": string or null, "reason": string or null}'
@@ -155,6 +195,7 @@ def screen_sensitivity(topic: str, snippet: str = "", sensitivity_level: str = "
             json_match = re.search(r"\{.*\}", content, flags=re.DOTALL)
             if json_match:
                 import json
+
                 data = json.loads(json_match.group(0))
                 return {
                     "isSensitive": bool(data.get("isSensitive")),
@@ -189,11 +230,13 @@ def evaluate_tone(content: str, target_tones: list, strictness: str = "moderate"
     if client:
         try:
             prompt = (
-                f"Evaluate if the following social media draft matches the brand tones: {', '.join(tones)}.\n"
+                f"Evaluate if the following social media draft matches the brand tones: "
+                f"{', '.join(tones)}.\n"
                 f"Strictness level: {strictness}.\n\n"
                 f"Draft:\n\"\"\"{content}\"\"\"\n\n"
                 "Respond strictly in JSON format with keys:\n"
-                '{"passed": bool, "score": float (0.0 to 1.0), "detectedTone": str, "critique": str or null, "suggestions": list of str}'
+                '{"passed": bool, "score": float (0.0 to 1.0), "detectedTone": str, '
+                '"critique": str or null, "suggestions": list of str}'
             )
             response = client.chat.completions.create(
                 model=model,
@@ -204,6 +247,7 @@ def evaluate_tone(content: str, target_tones: list, strictness: str = "moderate"
             json_match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
             if json_match:
                 import json
+
                 data = json.loads(json_match.group(0))
                 return {
                     "passed": bool(data.get("passed", True)),
