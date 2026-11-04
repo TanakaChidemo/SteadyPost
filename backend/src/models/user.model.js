@@ -58,4 +58,4 @@ async function updateById(userId, updates) {
   return withId(await User.findByIdAndUpdate(userId, updates, { new: true }).lean());
 }
 
-module.exports = { findByEmail, findById, findByGoogleId, create, linkGoogleId, setActiveWorkspace, updateById };
+module.exports = { User, findByEmail, findById, findByGoogleId, create, linkGoogleId, setActiveWorkspace, updateById };

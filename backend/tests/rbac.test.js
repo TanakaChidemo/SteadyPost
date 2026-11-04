@@ -89,7 +89,7 @@ describe("Role-Based Access Control (RBAC) & Membership Tests", () => {
       .send({ body: "Viewer attempting write", channel: "facebook" });
 
     expect(createRes.status).toBe(403);
-    expect(createRes.body.error).toMatch(/Insufficient workspace permissions/i);
+    expect(createRes.body.error).toMatch(/Viewers can look but not make changes/);
   });
 
   it("Editor can create a draft and submit for approval", async () => {
@@ -124,7 +124,7 @@ describe("Role-Based Access Control (RBAC) & Membership Tests", () => {
       .set("X-Workspace-Id", workspace.id);
 
     expect(approveRes.status).toBe(403);
-    expect(approveRes.body.error).toMatch(/Insufficient workspace permissions/i);
+    expect(approveRes.body.error).toBe("Only the business owner can do this.");
   });
 
   it("Editor cannot invite new members (403)", async () => {

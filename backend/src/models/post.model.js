@@ -34,6 +34,7 @@ const postSchema = new mongoose.Schema(
         "scheduled",
         "published",
         "failed",
+        "rejected",
       ],
       default: "draft",
       index: true,
@@ -83,6 +84,11 @@ async function updateById(id, updates) {
   return withId(await Post.findByIdAndUpdate(id, updates, { new: true }).lean());
 }
 
+/** Updates the post only if its status is still `status`; null if it moved on. */
+async function updateIfStatus(id, status, updates) {
+  return withId(await Post.findOneAndUpdate({ _id: id, status }, updates, { new: true }).lean());
+}
+
 async function deleteOne(query) {
   return Post.deleteOne(query);
 }
@@ -100,5 +106,6 @@ module.exports = {
   create,
   createMany,
   updateById,
+  updateIfStatus,
   deleteOne,
 };

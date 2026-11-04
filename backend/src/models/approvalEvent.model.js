@@ -4,6 +4,8 @@ const { newId, withId } = require("../utils/id");
 const approvalEventSchema = new mongoose.Schema(
   {
     _id: { type: String, default: () => newId("appr") },
+    // Null on events recorded before F10 (#07) added it.
+    workspaceId: { type: String, default: null, index: true, ref: "Workspace" },
     postId: { type: String, required: true, index: true, ref: "Post" },
     actorId: { type: String, required: true, ref: "User" },
     action: {

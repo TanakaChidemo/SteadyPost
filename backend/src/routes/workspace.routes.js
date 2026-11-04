@@ -2,7 +2,7 @@ const express = require("express");
 const controller = require("../controllers/workspace.controller");
 const { requireAuth } = require("../middleware/auth");
 const { resolveWorkspace } = require("../middleware/workspaceContext");
-const { requireWorkspaceRole } = require("../middleware/requireWorkspaceRole");
+const { requirePermission } = require("../middleware/requirePermission");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -16,14 +16,14 @@ router.get("/current", resolveWorkspace, (req, res) => {
   return controller.getById(req, res);
 });
 
-router.put("/current", resolveWorkspace, requireWorkspaceRole("owner"), controller.update);
-router.post("/current/archive", resolveWorkspace, requireWorkspaceRole("owner"), controller.archive);
-router.get("/current/members", resolveWorkspace, controller.listMembers);
-router.post("/current/invitations", resolveWorkspace, requireWorkspaceRole("owner"), controller.inviteMember);
+router.put("/current", resolveWorkspace, requirePermission("workspace.manage"), controller.update);
+router.post("/current/archive", resolveWorkspace, requirePermission("workspace.manage"), controller.archive);
+router.get("/current/members", resolveWorkspace, requirePermission("members.read"), controller.listMembers);
+router.post("/current/invitations", resolveWorkspace, requirePermission("members.manage"), controller.inviteMember);
 router.delete(
   "/current/members/:memberId",
   resolveWorkspace,
-  requireWorkspaceRole("owner"),
+  requirePermission("members.manage"),
   controller.removeMember
 );
 

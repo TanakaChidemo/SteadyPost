@@ -6,6 +6,7 @@ const businessProfileModel = require("../models/businessProfile.model");
 const notificationSettingsModel = require("../models/notificationSettings.model");
 const userModel = require("../models/user.model");
 const { profileFieldsSchema } = require("../validation/businessProfile");
+const { permissionsFor } = require("../auth/permissions");
 
 const inviteMemberSchema = z.object({
   email: z.string().email(),
@@ -17,6 +18,10 @@ async function list(req, res) {
   const workspaceIds = memberships.map((m) => m.workspaceId);
   const workspaces = await workspaceModel.find({ _id: { $in: workspaceIds }, ...workspaceModel.NOT_ARCHIVED });
   const profiles = await businessProfileModel.find({ workspaceId: { $in: workspaceIds } });
+  // Owners' names, so a team member can see whose business each team is.
+  const ownerIds = [...new Set(workspaces.map((ws) => ws.ownerId))];
+  const owners = await userModel.User.find({ _id: { $in: ownerIds } }, { name: 1, email: 1 }).lean();
+  const ownerNames = new Map(owners.map((u) => [u._id, u.name || u.email]));
 
   const enriched = workspaces.map((ws) => {
     const wsId = ws.id || ws._id;
@@ -25,6 +30,8 @@ async function list(req, res) {
     return {
       ...ws,
       role: mem?.role || "viewer",
+      permissions: permissionsFor(mem?.role || "viewer"),
+      ownerName: ownerNames.get(ws.ownerId) || "",
       membershipId: mem?.id || mem?._id,
       isCurrent: (req.user.activeWorkspaceId || req.workspaceId) === wsId,
       businessType: prof?.businessType || "",
