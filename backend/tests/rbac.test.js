@@ -154,7 +154,7 @@ describe("Role-Based Access Control (RBAC) & Membership Tests", () => {
       .send({ email: "newguest@example.com", role: "viewer" });
 
     expect(inviteRes.status).toBe(201);
-    expect(inviteRes.body.membership.status).toBe("invited");
+    expect(inviteRes.body.invitation.role).toBe("viewer");
     expect(inviteRes.body.inviteLink).toBeTruthy();
   });
 });

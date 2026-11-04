@@ -1,5 +1,3 @@
-const crypto = require("crypto");
-const { z } = require("zod");
 const workspaceModel = require("../models/workspace.model");
 const membershipModel = require("../models/membership.model");
 const businessProfileModel = require("../models/businessProfile.model");
@@ -7,11 +5,6 @@ const notificationSettingsModel = require("../models/notificationSettings.model"
 const userModel = require("../models/user.model");
 const { profileFieldsSchema } = require("../validation/businessProfile");
 const { permissionsFor } = require("../auth/permissions");
-
-const inviteMemberSchema = z.object({
-  email: z.string().email(),
-  role: z.enum(["editor", "viewer"]).default("editor"),
-});
 
 async function list(req, res) {
   const memberships = await membershipModel.listUserWorkspaces(req.user.id);
@@ -162,94 +155,6 @@ async function switchWorkspace(req, res) {
   });
 }
 
-async function listMembers(req, res) {
-  const members = await membershipModel.listWorkspaceMembers(req.workspaceId);
-  return res.json({ items: members });
-}
-
-async function inviteMember(req, res) {
-  const parsed = inviteMemberSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
-  }
-
-  const { email, role } = parsed.data;
-
-  // Check if existing user with email
-  const existingUser = await userModel.findByEmail(email);
-  if (existingUser) {
-    const existingMem = await membershipModel.findByUserAndWorkspace(existingUser.id, req.workspaceId);
-    if (existingMem) {
-      return res.status(409).json({ error: "User is already a member of this workspace" });
-    }
-  }
-
-  const inviteToken = crypto.randomBytes(24).toString("hex");
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-
-  const membership = await membershipModel.create({
-    workspaceId: req.workspaceId,
-    userId: existingUser?.id || null,
-    invitedEmail: email.toLowerCase(),
-    role,
-    status: "invited",
-    invitedBy: req.user.id,
-    inviteToken,
-    inviteExpiresAt: expiresAt,
-  });
-
-  return res.status(201).json({
-    membership,
-    inviteLink: `/invitations/accept?token=${inviteToken}`,
-  });
-}
-
-async function acceptInvitation(req, res) {
-  const { token } = req.body;
-  if (!token) return res.status(400).json({ error: "Invite token is required" });
-
-  const membership = await membershipModel.findOne({
-    inviteToken: token,
-    status: "invited",
-    inviteExpiresAt: { $gt: new Date() },
-  });
-
-  if (!membership || (await workspaceModel.filterActiveIds([membership.workspaceId])).length === 0) {
-    return res.status(400).json({ error: "Invalid or expired invitation token" });
-  }
-
-  const updated = await membershipModel.updateById(membership.id, {
-    userId: req.user.id,
-    status: "active",
-    inviteToken: null,
-    inviteExpiresAt: null,
-    joinedAt: new Date(),
-  });
-
-  await userModel.setActiveWorkspace(req.user.id, membership.workspaceId);
-
-  return res.json({
-    message: "Invitation accepted",
-    membership: updated,
-  });
-}
-
-async function removeMember(req, res) {
-  const memberId = req.params.memberId;
-  const targetMem = await membershipModel.findById(memberId);
-
-  if (!targetMem || targetMem.workspaceId !== req.workspaceId) {
-    return res.status(404).json({ error: "Membership not found" });
-  }
-
-  if (targetMem.role === "owner") {
-    return res.status(400).json({ error: "Cannot remove workspace owner" });
-  }
-
-  await membershipModel.updateById(memberId, { status: "removed" });
-  return res.status(204).send();
-}
-
 /**
  * Archives the current workspace (owner only). Nothing is deleted: the
  * workspace and everything in it are kept, but it no longer appears in
@@ -290,8 +195,4 @@ module.exports = {
   getById,
   update,
   switchWorkspace,
-  listMembers,
-  inviteMember,
-  acceptInvitation,
-  removeMember,
 };
