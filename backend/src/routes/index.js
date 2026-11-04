@@ -11,6 +11,7 @@ const postRoutes = require("./post.routes");
 const opportunityRoutes = require("./opportunity.routes");
 const websiteRoutes = require("./website.routes");
 const guardrailsRoutes = require("./guardrails.routes");
+const approvalsRoutes = require("./approvals.routes");
 
 const router = express.Router();
 
@@ -25,5 +26,6 @@ router.use("/guardrails", guardrailsRoutes);
 router.use("/publish", publishRoutes);
 router.use("/social-accounts", socialAccountRoutes);
 router.use("/website", websiteRoutes);
+router.use("/approvals", approvalsRoutes);
 
 module.exports = router;
