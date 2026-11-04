@@ -284,10 +284,17 @@ async function requestChanges(req, res) {
   return res.json(updated);
 }
 
+// Statuses a post can't be published from again.
+const ALREADY_PUBLISHING = ["scheduled", "publishing", "published"];
+
 async function publishNow(req, res) {
   const post = await postModel.findById(req.params.id);
   if (!post || post.workspaceId !== req.workspaceId) {
     return res.status(404).json({ error: "Post not found" });
+  }
+
+  if (ALREADY_PUBLISHING.includes(post.status)) {
+    return res.status(409).json({ error: `This post is already ${post.status}` });
   }
 
   if (post.socialAccountId) {
@@ -300,6 +307,17 @@ async function publishNow(req, res) {
     } catch (err) {
       return res.status(err.status || 403).json({ error: err.message });
     }
+  }
+
+  // Only owners reach here; publishing a post that wasn't approved counts as
+  // the owner approving it, so the audit trail stays complete.
+  if (post.status !== "approved") {
+    await approvalEventModel.create({
+      postId: post.id,
+      actorId: req.user.id,
+      action: "approve",
+      comment: "Published directly by the owner",
+    });
   }
 
   await postModel.updateById(post.id, { status: "scheduled" });

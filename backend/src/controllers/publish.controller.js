@@ -45,7 +45,7 @@ async function publishNow(req, res) {
     ? [socialAccountId]
     : [];
 
-  const effectiveWorkspaceId = req.workspaceId || req.user.activeWorkspaceId || null;
+  const effectiveWorkspaceId = req.workspaceId;
 
   for (const accId of targetAccountIds) {
     try {
