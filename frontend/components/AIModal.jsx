@@ -7,6 +7,8 @@ import {
   SparklesIcon,
   InstagramIcon,
   FacebookIcon,
+  TwitterIcon,
+  LinkedInIcon,
   CheckIcon,
   RefreshIcon,
   SpinnerIcon,
@@ -28,6 +30,13 @@ const AVAILABLE_CHANNELS = [
     maxChars: 5000,
     color: "text-indigo-400 border-indigo-500/40 bg-indigo-500/10",
   },
+];
+
+const MULTI_MODEL_PLATFORMS = [
+  { id: "instagram", label: "Instagram", icon: InstagramIcon },
+  { id: "facebook", label: "Facebook", icon: FacebookIcon },
+  { id: "twitter", label: "Twitter / X", icon: TwitterIcon },
+  { id: "linkedin", label: "LinkedIn", icon: LinkedInIcon },
 ];
 
 // Single unified tone list matching the Business Profile
@@ -149,7 +158,7 @@ function GuardrailsAuditCard({ report, onReaudit, loading }) {
 
 export function AIModal({ onInsert, initialContent, onDraftCreated }) {
   const { isAiModalOpen, setAiModalOpen, addToast } = useAppStore();
-  const [activeTab, setActiveTab] = useState("write"); // write | repurpose | hashtags
+  const [activeTab, setActiveTab] = useState("write"); // write | multi_model | repurpose | hashtags
 
   // --- Tab 1: Write Posts State ---
   const [writeIdea, setWriteIdea] = useState("");
@@ -164,6 +173,17 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
   const [writeGuardrails, setWriteGuardrails] = useState({});
   const [repurposeGuardrails, setRepurposeGuardrails] = useState({});
   const [auditingChannel, setAuditingChannel] = useState(null);
+
+  // --- Tab 2: Multi-Model AI State ---
+  const [modelTopic, setModelTopic] = useState("");
+  const [modelPlatform, setModelPlatform] = useState("instagram");
+  const [modelTone, setModelTone] = useState("professional");
+  const [candidates, setCandidates] = useState([]);
+  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [modelGuardrails, setModelGuardrails] = useState(null);
+  const [savingCandidate, setSavingCandidate] = useState(false);
+  const [savedCandidate, setSavedCandidate] = useState(false);
 
   async function auditVariant(variant, isRepurpose = false) {
     if (!variant?.content?.body) return;
@@ -185,7 +205,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
     }
   }
 
-  // --- Tab 2: Reuse a Past Post State ---
+  // --- Tab 3: Reuse a Past Post State ---
   const [topPosts, setTopPosts] = useState([]);
   const [loadingTopPosts, setLoadingTopPosts] = useState(false);
   const [selectedTopPost, setSelectedTopPost] = useState(null);
@@ -197,7 +217,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
   const [savingRepurposeVariantChannel, setSavingRepurposeVariantChannel] = useState(null);
   const [savedRepurposeVariants, setSavedRepurposeVariants] = useState({});
 
-  // --- Tab 3: Hashtags State ---
+  // --- Tab 4: Hashtags State ---
   const [tagContent, setTagContent] = useState("");
   const [generatedTags, setGeneratedTags] = useState([]);
   const [tagLoading, setTagLoading] = useState(false);
@@ -209,6 +229,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
   useEffect(() => {
     if (isAiModalOpen && initialContent) {
       setWriteIdea(initialContent);
+      setModelTopic(initialContent);
       setTagContent(initialContent);
     }
   }, [isAiModalOpen, initialContent]);
@@ -224,6 +245,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
             const match = UNIFIED_TONES.find((t) => t.id === firstTone);
             if (match) {
               setWriteTone(match.id);
+              setModelTone(match.id);
               setRepurposeTone(match.id);
             }
           }
@@ -499,6 +521,97 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
     }
   }
 
+  // --- Multi-Model AI Handlers ---
+  async function handleGenerateMultiModel() {
+    if (!modelTopic.trim()) {
+      return addToast("error", "Please enter a topic or copy to generate");
+    }
+    setModelLoading(true);
+    setSavedCandidate(false);
+    try {
+      const res = await api.ai.generateCaption({
+        topic: modelTopic,
+        platform: modelPlatform,
+        tone: modelTone,
+      });
+
+      const rawCandidates =
+        res.candidates && res.candidates.length > 0
+          ? res.candidates
+          : [
+              {
+                provider: "default",
+                label: "SteadyPost AI",
+                model: res.model || "standard",
+                caption: res.caption,
+                status: "success",
+                error: null,
+              },
+            ];
+
+      setCandidates(rawCandidates);
+      setModelGuardrails(res.guardrails || null);
+
+      const firstSuccess = rawCandidates.findIndex(
+        (c) => c.status === "success" && c.caption
+      );
+      const chosenIdx = firstSuccess >= 0 ? firstSuccess : 0;
+      setSelectedCandidateIndex(chosenIdx);
+      addToast(
+        "success",
+        `Evaluated copy across ${rawCandidates.filter((c) => c.status === "success").length} models!`
+      );
+    } catch (err) {
+      addToast("error", err.message || "Failed to generate multi-model captions");
+    } finally {
+      setModelLoading(false);
+    }
+  }
+
+  async function handleSaveCandidateDraft(candidate) {
+    if (!candidate?.caption) return;
+    setSavingCandidate(true);
+    try {
+      await api.posts.create({
+        channel: modelPlatform,
+        title: `${modelPlatform.charAt(0).toUpperCase() + modelPlatform.slice(1)} Post: ${modelTopic.slice(0, 30)}`,
+        body: candidate.caption,
+        status: "draft",
+        aiMetadata: {
+          provider: candidate.provider,
+          model: candidate.model,
+          tone: modelTone,
+          topic: modelTopic,
+          guardrails: modelGuardrails,
+        },
+      });
+      setSavedCandidate(true);
+      onDraftCreated?.();
+      addToast("success", `Saved ${modelPlatform} post as draft!`);
+    } catch (err) {
+      addToast("error", err.message || "Failed to save draft");
+    } finally {
+      setSavingCandidate(false);
+    }
+  }
+
+  async function handleAuditCandidate(candidate) {
+    if (!candidate?.caption) return;
+    try {
+      const audit = await api.guardrails.checkDraft({
+        content: candidate.caption,
+        channel: modelPlatform,
+      });
+      setModelGuardrails(audit);
+      addToast(
+        "info",
+        `Guardrails audit: ${audit.score}/100 (${audit.passed ? "Passed" : "Issues Flagged"})`
+      );
+    } catch (err) {
+      addToast("error", err.message || "Guardrails audit failed");
+    }
+  }
+
   // --- Shared Actions ---
   function copyText(text, key) {
     if (!text) return;
@@ -520,6 +633,10 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
   const currentRepurposeVariant = repurposeVariants.find(
     (v) => v.channel === activeRepurposeChannel
   );
+  const selectedCandidate =
+    candidates.length > 0 && candidates[selectedCandidateIndex]?.status === "success"
+      ? candidates[selectedCandidateIndex]
+      : candidates.find((c) => c.status === "success") || null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm">
@@ -546,7 +663,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-slate-950 border border-slate-800 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-lg bg-slate-950 border border-slate-800 mb-6">
           <button
             onClick={() => setActiveTab("write")}
             className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
@@ -560,6 +677,17 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
           </button>
 
           <button
+            onClick={() => setActiveTab("multi_model")}
+            className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+              activeTab === "multi_model"
+                ? "bg-indigo-600 text-white shadow"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+            }`}
+          >
+            <span>⚡ Multi-Model AI</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab("repurpose")}
             className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
               activeTab === "repurpose"
@@ -568,7 +696,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
             }`}
           >
             <RefreshIcon className="w-3.5 h-3.5" />
-            <span>Reuse a past post</span>
+            <span>Reuse past post</span>
           </button>
 
           <button
@@ -822,7 +950,273 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
         )}
 
         {/* ========================================================= */}
-        {/* TAB 2: REUSE A PAST POST                                  */}
+        {/* TAB 2: MULTI-MODEL AI COMPARISON (GROQ, OPENROUTER, GEMINI)*/}
+        {/* ========================================================= */}
+        {activeTab === "multi_model" && (
+          <div className="space-y-5">
+            {/* Input Box */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Topic, Promotion, or Message
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  Compare Groq, OpenRouter & Gemini side-by-side
+                </span>
+              </div>
+              <textarea
+                rows={3}
+                value={modelTopic}
+                onChange={(e) => setModelTopic(e.target.value)}
+                placeholder="e.g. Announcing our spring seasonal menu with artisan pastries and locally roasted coffee..."
+                className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 leading-relaxed font-sans"
+              />
+            </div>
+
+            {/* Target Platform & Tone */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+              <div className="sm:col-span-7 space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  Target Platform
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  {MULTI_MODEL_PLATFORMS.map((p) => {
+                    const Icon = p.icon;
+                    const isSelected = modelPlatform === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setModelPlatform(p.id)}
+                        className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-md border text-xs font-semibold transition ${
+                          isSelected
+                            ? "border-indigo-500 bg-indigo-950/40 text-indigo-200"
+                            : "border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span>{p.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="sm:col-span-5 space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  Brand Tone
+                </label>
+                <select
+                  value={modelTone}
+                  onChange={(e) => setModelTone(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-xs font-medium text-white focus:outline-none focus:border-indigo-500"
+                >
+                  {UNIFIED_TONES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500 leading-tight">
+                  Defaults to your business profile tone.
+                </p>
+              </div>
+            </div>
+
+            {/* Generate Action Button */}
+            <button
+              onClick={handleGenerateMultiModel}
+              disabled={modelLoading}
+              className="w-full py-3 rounded-md gradient-brand text-white text-xs font-bold hover:opacity-95 transition flex items-center justify-center gap-2 shadow-lg disabled:opacity-60"
+            >
+              {modelLoading ? (
+                <>
+                  <SpinnerIcon className="w-4 h-4 animate-spin" />
+                  <span>Evaluating across 3 LLM models in parallel…</span>
+                </>
+              ) : (
+                <>
+                  <SparklesIcon className="w-4 h-4" />
+                  <span>Generate Captions with All 3 Models</span>
+                </>
+              )}
+            </button>
+
+            {/* Candidates Comparison Grid */}
+            {candidates.length > 0 && (
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                      Compare & Select Preferred Model
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Click any model card below to inspect and use its generated copy.
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-medium text-indigo-400">
+                    {candidates.filter((c) => c.status === "success").length} of {candidates.length} models ready
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  {candidates.map((cand, idx) => {
+                    const isSelected = selectedCandidateIndex === idx;
+                    const isSuccess = cand.status === "success" && cand.caption;
+                    const isUnconfigured = cand.status === "not_configured";
+
+                    const providerTheme = {
+                      groq: {
+                        badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+                        accent: "border-emerald-500/40",
+                        icon: "⚡",
+                        name: "Groq",
+                      },
+                      openrouter: {
+                        badge: "bg-purple-500/10 text-purple-400 border-purple-500/30",
+                        accent: "border-purple-500/40",
+                        icon: "🌐",
+                        name: "OpenRouter",
+                      },
+                      gemini: {
+                        badge: "bg-sky-500/10 text-sky-400 border-sky-500/30",
+                        accent: "border-sky-500/40",
+                        icon: "✨",
+                        name: "Google Gemini",
+                      },
+                    }[cand.provider] || {
+                      badge: "bg-indigo-500/10 text-indigo-400 border-indigo-500/30",
+                      accent: "border-indigo-500/40",
+                      icon: "🤖",
+                      name: cand.label || "AI Model",
+                    };
+
+                    const charCount = cand.caption ? cand.caption.length : 0;
+                    const wordCount = cand.caption
+                      ? cand.caption.split(/\s+/).filter(Boolean).length
+                      : 0;
+
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => isSuccess && setSelectedCandidateIndex(idx)}
+                        className={`p-3.5 rounded-lg border transition cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? "bg-slate-950 border-indigo-500 ring-1 ring-indigo-500/40"
+                            : "bg-slate-950/60 border-slate-800 hover:border-slate-700"
+                        } ${!isSuccess ? "opacity-60 cursor-not-allowed" : ""}`}
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold border flex items-center gap-1 ${providerTheme.badge}`}
+                            >
+                              <span>{providerTheme.icon}</span>
+                              <span>{providerTheme.name}</span>
+                            </span>
+                            {isSelected && (
+                              <span className="text-[10px] text-indigo-300 font-semibold bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-700/60">
+                                Selected
+                              </span>
+                            )}
+                          </div>
+
+                          {isSuccess ? (
+                            <p className="text-xs text-slate-300 line-clamp-4 leading-relaxed font-sans">
+                              {cand.caption}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-slate-500 italic">
+                              {isUnconfigured
+                                ? "API key not configured in .env"
+                                : cand.error || "Generation error"}
+                            </p>
+                          )}
+                        </div>
+
+                        {isSuccess && (
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 pt-3 border-t border-slate-900 mt-2">
+                            <span>{wordCount} words</span>
+                            <span>{charCount} chars</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Selected Candidate Detailed Inspection & Actions */}
+                {selectedCandidate && (
+                  <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3.5 shadow-inner">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white capitalize flex items-center gap-1.5">
+                          {selectedCandidate.label || selectedCandidate.provider} Candidate Copy
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          ({selectedCandidate.model || "standard"})
+                        </span>
+                      </div>
+                      <span className="text-xs font-mono text-slate-400">
+                        {selectedCandidate.caption?.length || 0} characters
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 rounded bg-slate-900/60 border border-slate-800 text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
+                      {selectedCandidate.caption}
+                    </div>
+
+                    {/* F09 Brand Guardrails & Voice Audit */}
+                    <GuardrailsAuditCard
+                      report={modelGuardrails}
+                      onReaudit={() => handleAuditCandidate(selectedCandidate)}
+                    />
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800/60">
+                      <button
+                        onClick={() => copyText(selectedCandidate.caption, "multi_model_copy")}
+                        className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
+                      >
+                        {copiedKey === "multi_model_copy" ? "Copied!" : "Copy"}
+                      </button>
+
+                      <button
+                        onClick={() => applyToEditor(selectedCandidate.caption)}
+                        className="px-3.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold transition"
+                      >
+                        Use in editor
+                      </button>
+
+                      <button
+                        onClick={() => handleSaveCandidateDraft(selectedCandidate)}
+                        disabled={savingCandidate || savedCandidate}
+                        className="px-3.5 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow disabled:opacity-60 flex items-center gap-1.5"
+                      >
+                        {savingCandidate ? (
+                          <>
+                            <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
+                            <span>Saving…</span>
+                          </>
+                        ) : savedCandidate ? (
+                          <>
+                            <CheckIcon className="w-3.5 h-3.5 text-emerald-300" />
+                            <span>Saved</span>
+                          </>
+                        ) : (
+                          <span>Save as Draft</span>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* TAB 3: REUSE A PAST POST                                  */}
         {/* ========================================================= */}
         {activeTab === "repurpose" && (
           <div className="space-y-5">
