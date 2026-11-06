@@ -147,6 +147,9 @@ async function checkTrendSensitivity({
 
     if (response.ok) {
       const data = await response.json();
+      if (data.source === "fallback") {
+        return localResult;
+      }
       return {
         isSensitive: Boolean(data.isSensitive),
         category: data.category || null,
