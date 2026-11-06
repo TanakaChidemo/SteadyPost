@@ -12,6 +12,8 @@ def tone_endpoint():
     strictness = data.get("strictness", "moderate")
 
     result = evaluate_tone(content, target_tones, strictness)
+    if result.get("source") == "fallback":
+        return jsonify(result), 503
     return jsonify(result)
 
 

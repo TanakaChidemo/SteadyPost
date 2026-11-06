@@ -23,6 +23,7 @@ const businessProfileSchema = new mongoose.Schema(
       requiredDisclosures: { type: [String], default: [] },
       toneStrictness: { type: String, enum: ["strict", "moderate", "relaxed"], default: "moderate" },
       bannedKeywords: { type: [String], default: [] },
+      sensitivityLevel: { type: String, enum: ["conservative", "standard", "relaxed"], default: "standard" },
       sensitivitySensitivity: { type: String, enum: ["conservative", "standard", "relaxed"], default: "standard" },
     },
     // Set when the onboarding wizard is finished (#04). Null means the
@@ -44,9 +45,26 @@ async function find(query = {}) {
 }
 
 async function upsert(workspaceId, profileData) {
+  const { guardrails, ...rest } = profileData || {};
+  const setPayload = { ...rest };
+
+  if (guardrails && typeof guardrails === "object") {
+    const normalizedGuardrails = { ...guardrails };
+    if (normalizedGuardrails.sensitivityLevel && !normalizedGuardrails.sensitivitySensitivity) {
+      normalizedGuardrails.sensitivitySensitivity = normalizedGuardrails.sensitivityLevel;
+    } else if (normalizedGuardrails.sensitivitySensitivity && !normalizedGuardrails.sensitivityLevel) {
+      normalizedGuardrails.sensitivityLevel = normalizedGuardrails.sensitivitySensitivity;
+    }
+    for (const [key, value] of Object.entries(normalizedGuardrails)) {
+      if (value !== undefined) {
+        setPayload[`guardrails.${key}`] = value;
+      }
+    }
+  }
+
   const updated = await BusinessProfile.findOneAndUpdate(
     { workspaceId },
-    { $set: profileData },
+    { $set: setPayload },
     { new: true, upsert: true, setDefaultsOnInsert: true }
   ).lean();
   return withId(updated);

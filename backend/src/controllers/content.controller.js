@@ -1,5 +1,6 @@
 const ContentDraft = require("../models/contentDraft.model");
 const postModel = require("../models/post.model");
+const guardrailsService = require("../services/guardrails/guardrailsService");
 const { z } = require("zod");
 
 const draftSchema = z.object({
@@ -25,6 +26,15 @@ async function create(req, res) {
 
   const { title, body, platforms = [], mediaUrls = [], aiMetadata = {} } = parsed.data;
 
+  const guardrails =
+    aiMetadata.guardrails ||
+    (await guardrailsService.auditDraft({
+      content: body,
+      channel: platforms[0] || "instagram",
+      mediaUrls,
+      workspaceId: req.workspaceId,
+    }));
+
   const draft = await ContentDraft.create({
     ownerId: req.user.id,
     title,
@@ -32,7 +42,10 @@ async function create(req, res) {
     platforms,
     mediaUrls,
     status: "draft",
-    aiMetadata,
+    aiMetadata: {
+      ...aiMetadata,
+      guardrails,
+    },
     versions: [{ body, editedAt: new Date(), editedBy: req.user.id }],
   });
 
@@ -71,6 +84,15 @@ async function update(req, res) {
   draft.status = req.body.status !== undefined ? req.body.status : draft.status;
   if (req.body.aiMetadata) {
     draft.aiMetadata = { ...(draft.aiMetadata || {}), ...req.body.aiMetadata };
+  }
+  if (req.body.body !== undefined || req.body.mediaUrls !== undefined || req.body.platforms !== undefined) {
+    const guardrails = await guardrailsService.auditDraft({
+      content: draft.body || "",
+      channel: draft.platforms?.[0] || "instagram",
+      mediaUrls: draft.mediaUrls || [],
+      workspaceId: req.workspaceId,
+    });
+    draft.aiMetadata = { ...(draft.aiMetadata || {}), guardrails };
   }
 
   await ContentDraft.save(draft);

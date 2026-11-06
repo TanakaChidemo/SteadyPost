@@ -304,6 +304,25 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
     }
   }
 
+  async function auditVariantsInParallel(variants) {
+    const entries = await Promise.all(
+      variants.map(async (v) => {
+        try {
+          const audit = await api.guardrails.checkDraft({
+            content: v.content?.body || "",
+            channel: v.channel,
+            hashtags: v.content?.hashtags || [],
+            mediaUrls: v.content?.mediaUrls || [],
+          });
+          return [v.channel, audit];
+        } catch {
+          return null;
+        }
+      })
+    );
+    return Object.fromEntries(entries.filter(Boolean));
+  }
+
   // --- Generation Handlers ---
   async function handleGeneratePosts() {
     if (!writeIdea.trim()) {
@@ -321,18 +340,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
       setWriteVariants(variants);
       if (variants.length > 0) {
         setActiveWriteChannel(variants[0].channel);
-        const audits = {};
-        for (const v of variants) {
-          try {
-            const audit = await api.guardrails.checkDraft({
-              content: v.content?.body || "",
-              channel: v.channel,
-            });
-            audits[v.channel] = audit;
-          } catch {
-            // non-blocking
-          }
-        }
+        const audits = await auditVariantsInParallel(variants);
         setWriteGuardrails(audits);
       }
       addToast(
@@ -363,18 +371,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
       setRepurposeVariants(variants);
       if (variants.length > 0) {
         setActiveRepurposeChannel(variants[0].channel);
-        const audits = {};
-        for (const v of variants) {
-          try {
-            const audit = await api.guardrails.checkDraft({
-              content: v.content?.body || "",
-              channel: v.channel,
-            });
-            audits[v.channel] = audit;
-          } catch {
-            // non-blocking
-          }
-        }
+        const audits = await auditVariantsInParallel(variants);
         setRepurposeGuardrails(audits);
       }
       addToast(
@@ -546,20 +543,41 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                 caption: res.caption,
                 status: "success",
                 error: null,
+                guardrails: res.guardrails || null,
               },
             ];
 
-      setCandidates(rawCandidates);
-      setModelGuardrails(res.guardrails || null);
+      // Ensure every successful candidate has its own guardrails audit
+      const auditedCandidates = await Promise.all(
+        rawCandidates.map(async (cand) => {
+          if (cand.status === "success" && cand.caption && !cand.guardrails) {
+            try {
+              const audit = await api.guardrails.checkDraft({
+                content: cand.caption,
+                channel: modelPlatform,
+              });
+              return { ...cand, guardrails: audit };
+            } catch {
+              return { ...cand, guardrails: res.guardrails || null };
+            }
+          }
+          return cand;
+        })
+      );
 
-      const firstSuccess = rawCandidates.findIndex(
+      setCandidates(auditedCandidates);
+
+      const firstSuccess = auditedCandidates.findIndex(
         (c) => c.status === "success" && c.caption
       );
       const chosenIdx = firstSuccess >= 0 ? firstSuccess : 0;
       setSelectedCandidateIndex(chosenIdx);
+      setModelGuardrails(
+        auditedCandidates[chosenIdx]?.guardrails || res.guardrails || null
+      );
       addToast(
         "success",
-        `Evaluated copy across ${rawCandidates.filter((c) => c.status === "success").length} models!`
+        `Evaluated copy across ${auditedCandidates.filter((c) => c.status === "success").length} models!`
       );
     } catch (err) {
       addToast("error", err.message || "Failed to generate multi-model captions");
@@ -582,7 +600,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
           model: candidate.model,
           tone: modelTone,
           topic: modelTopic,
-          guardrails: modelGuardrails,
+          guardrails: candidate.guardrails || modelGuardrails,
         },
       });
       setSavedCandidate(true);
@@ -602,6 +620,13 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
         content: candidate.caption,
         channel: modelPlatform,
       });
+      setCandidates((prev) =>
+        prev.map((c) =>
+          c.provider === candidate.provider && c.caption === candidate.caption
+            ? { ...c, guardrails: audit }
+            : c
+        )
+      );
       setModelGuardrails(audit);
       addToast(
         "info",
@@ -1168,7 +1193,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
 
                     {/* F09 Brand Guardrails & Voice Audit */}
                     <GuardrailsAuditCard
-                      report={modelGuardrails}
+                      report={selectedCandidate.guardrails ?? modelGuardrails}
                       onReaudit={() => handleAuditCandidate(selectedCandidate)}
                     />
 

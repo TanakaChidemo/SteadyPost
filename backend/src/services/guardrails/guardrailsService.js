@@ -12,6 +12,8 @@ const businessProfileModel = require("../../models/businessProfile.model");
 async function auditDraft({
   content = "",
   channel = "instagram",
+  hashtags = [],
+  mediaUrls = [],
   workspaceId = null,
   profile = null,
 } = {}) {
@@ -28,16 +30,25 @@ async function auditDraft({
   const requiredDisclosures = guardrailsConfig.requiredDisclosures || [];
   const toneStrictness = guardrailsConfig.toneStrictness || "moderate";
 
+  // Combine body content and hashtags so disclosures (#ad) and banned keywords in hashtags are evaluated
+  const normalizedHashtags = Array.isArray(hashtags)
+    ? hashtags
+        .map((t) => String(t || "").trim())
+        .filter(Boolean)
+        .map((t) => (t.startsWith("#") ? t : `#${t}`))
+    : [];
+  const fullText = [content, normalizedHashtags.join(" ")].filter(Boolean).join(" ");
+
   // 1. Banned claims & keywords check
   const bannedCheck = checkBannedClaims({
-    text: content,
+    text: fullText,
     workspaceBannedClaims: bannedClaims,
     workspaceBannedKeywords: bannedKeywords,
   });
 
   // 2. Disclosures check
   const disclosuresCheck = checkDisclosures({
-    text: content,
+    text: fullText,
     workspaceRequiredDisclosures: requiredDisclosures,
   });
 
@@ -62,6 +73,14 @@ async function auditDraft({
     });
   }
 
+  const warnings = [];
+  if (Array.isArray(mediaUrls) && mediaUrls.length > 4) {
+    warnings.push({
+      category: "media_limit",
+      message: `Attached ${mediaUrls.length} media files; social platforms allow up to 4 per post.`,
+    });
+  }
+
   const allPassed = violations.length === 0;
 
   // Compute composite score (0 - 100)
@@ -69,7 +88,7 @@ async function auditDraft({
   score -= violations.filter((v) => v.category === "banned_claims").length * 35;
   score -= violations.filter((v) => v.category === "missing_disclosures").length * 20;
   if (!toneCheck.passed) {
-    score -= Math.round((1 - (toneCheck.score || 0.5)) * 25);
+    score -= Math.round((1 - (toneCheck.score ?? 0.5)) * 25);
   }
   score = Math.max(0, Math.min(100, score));
 
@@ -83,7 +102,7 @@ async function auditDraft({
     disclosures: disclosuresCheck,
     tone: toneCheck,
     violations,
-    warnings: [],
+    warnings,
   };
 }
 
@@ -101,7 +120,10 @@ async function auditTrend({
     effectiveProfile = await businessProfileModel.findByWorkspaceId(workspaceId);
   }
 
-  const sensitivityLevel = effectiveProfile?.guardrails?.sensitivitySensitivity || "standard";
+  const sensitivityLevel =
+    effectiveProfile?.guardrails?.sensitivityLevel ||
+    effectiveProfile?.guardrails?.sensitivitySensitivity ||
+    "standard";
   const result = await checkTrendSensitivity({ topic, snippet, sensitivityLevel });
 
   return {

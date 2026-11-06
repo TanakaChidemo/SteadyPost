@@ -183,7 +183,24 @@ async function submitApproval(req, res) {
     return res.status(404).json({ error: "Post not found" });
   }
 
-  const updated = await postModel.updateById(post.id, { status: "pending_approval" });
+  let guardrails = post.aiMetadata?.guardrails;
+  if (!guardrails) {
+    guardrails = await guardrailsService.auditDraft({
+      content: post.content?.body || "",
+      channel: post.channel || "instagram",
+      mediaUrls: post.content?.mediaUrls || [],
+      hashtags: post.content?.hashtags || [],
+      workspaceId: req.workspaceId,
+    });
+  }
+
+  const updated = await postModel.updateById(post.id, {
+    status: "pending_approval",
+    aiMetadata: {
+      ...(post.aiMetadata || {}),
+      guardrails,
+    },
+  });
 
   await approvalEventModel.create({
     postId: post.id,
@@ -192,7 +209,13 @@ async function submitApproval(req, res) {
     comment: req.body.comment || "",
   });
 
-  return res.json(updated);
+  return res.json({
+    ...updated,
+    guardrailsWarning:
+      guardrails && !guardrails.passed
+        ? `Post has ${guardrails.violations?.length || 1} brand guardrail violation(s) requiring approver review.`
+        : null,
+  });
 }
 
 async function approve(req, res) {

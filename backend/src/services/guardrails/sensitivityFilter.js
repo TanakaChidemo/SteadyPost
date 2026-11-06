@@ -31,7 +31,7 @@ const SENSITIVE_PATTERNS = [
   },
   {
     category: "fatal_accident",
-    pattern: /\b(?:plane\s+crash|flight\s+crash|train\s+derailment|fatal\s+pileup|deadly\s+explosion|building\s+collapse|ferry\s+capsizes?|boat\s+capsizes?|(?:tank\s+)?explosion)\b.*?\b(?:kills?|killed|deaths?|dead|fatalities|casualties)\b/i,
+    pattern: /\b(?:plane\s+crash|flight\s+crash|train\s+derailment|fatal\s+pileup|deadly\s+explosion|building\s+collapse)\b.*?\b(?:kills?|killed|deaths?|dead|fatalities|casualties)\b/i,
     patternShort: /\b(?:fatal\s+(?:plane\s+crash|explosion|crash)|deadly\s+(?:train\s+derailment|collapse|explosion))\b/i,
     reason: "Fatal transportation or industrial catastrophe.",
   },
@@ -53,7 +53,7 @@ const SENSITIVE_PATTERNS = [
   },
   {
     category: "civil_unrest",
-    pattern: /\b(?:violent\s+riots?|martial\s+law\s+declared|violent\s+clashes\s+leave\s+(?:\d+|several)\s+dead)\b/i,
+    pattern: /\b(?:violent\s+riots?|martial\s+law\s+declared)\b/i,
     reason: "Violent civil unrest or state of emergency.",
   },
 ];
@@ -93,8 +93,8 @@ function evaluateLocally(text, sensitivityLevel = "standard") {
     }
   }
 
-  // Check direct casualty pairing (e.g. "14 confirmed fatalities", "45 passengers dead", "19 patients dead")
-  const casualtyMatch = sanitized.match(/\b(?:\d+|dozens?|scores?)\s+(?:(?:\w+\s+)?(?:killed|dead|fatalities|casualties)|injured\s+in\s+blast|slain)\b/i);
+  // Check direct casualty pairing (e.g. "14 confirmed fatalities", "45 passengers dead")
+  const casualtyMatch = sanitized.match(/\b(?:\d+|dozens?|scores?|hundreds?)\s+(?:(?:\w+\s+)?(?:killed|dead|fatalities|casualties)|slain)\b/i);
   if (casualtyMatch) {
     return {
       isSensitive: true,

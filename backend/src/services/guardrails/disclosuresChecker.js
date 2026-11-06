@@ -1,6 +1,4 @@
-function escapeRegex(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+const { escapeRegex } = require("../../utils/regex");
 
 const SPONSORED_TRIGGERS = [
   { pattern: /\b(?:sponsored\s+by|in\s+partnership\s+with|paid\s+partnership|brand\s+ambassador)\b/i, label: "sponsored partnership" },
@@ -9,10 +7,10 @@ const SPONSORED_TRIGGERS = [
 ];
 
 const STANDARD_DISCLOSURES = [
-  /#ad\b/i,
-  /#sponsored\b/i,
-  /#partner\b/i,
-  /#paidpartnership\b/i,
+  /(?<![\w#])#ad(?![\w])/i,
+  /(?<![\w#])#sponsored(?![\w])/i,
+  /(?<![\w#])#partner(?![\w])/i,
+  /(?<![\w#])#paidpartnership(?![\w])/i,
   /\[ad\]/i,
   /\(ad\)/i,
   /\bpaid\s+promotion\b/i,
@@ -51,9 +49,10 @@ function checkDisclosures({
       const trimmed = (reqDisc || "").trim();
       if (!trimmed) continue;
 
-      const isPresent = trimmed.startsWith("#")
-        ? new RegExp("(?:^|\\s)" + escapeRegex(trimmed) + '(?:$|[\\s.,!?;)"\'])', "i").test(content)
-        : content.toLowerCase().includes(trimmed.toLowerCase());
+      const pattern = trimmed.startsWith("#")
+        ? `(?<![\\w#])${escapeRegex(trimmed)}(?![\\w])`
+        : `(?<![\\w])${escapeRegex(trimmed)}(?![\\w])`;
+      const isPresent = new RegExp(pattern, "i").test(content);
 
       if (isPresent) {
         present.push(trimmed);

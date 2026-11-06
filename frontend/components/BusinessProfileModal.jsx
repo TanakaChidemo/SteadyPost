@@ -75,6 +75,7 @@ export function BusinessProfileModal() {
 
   // Guardrail Settings (F09)
   const [bannedClaimsInput, setBannedClaimsInput] = useState("");
+  const [bannedKeywordsInput, setBannedKeywordsInput] = useState("");
   const [requiredDisclosuresInput, setRequiredDisclosuresInput] = useState("");
   const [toneStrictness, setToneStrictness] = useState("moderate");
   const [sensitivityLevel, setSensitivityLevel] = useState("standard");
@@ -118,9 +119,12 @@ export function BusinessProfileModal() {
           setActiveChannels(knownKeys(prof.activeChannels, CHANNELS));
           if (prof.guardrails) {
             setBannedClaimsInput((prof.guardrails.bannedClaims || []).join(", "));
+            setBannedKeywordsInput((prof.guardrails.bannedKeywords || []).join(", "));
             setRequiredDisclosuresInput((prof.guardrails.requiredDisclosures || []).join(", "));
             setToneStrictness(prof.guardrails.toneStrictness || "moderate");
-            setSensitivityLevel(prof.guardrails.sensitivitySensitivity || "standard");
+            setSensitivityLevel(
+              prof.guardrails.sensitivityLevel || prof.guardrails.sensitivitySensitivity || "standard"
+            );
           }
         }
         if (notif) {
@@ -193,9 +197,10 @@ export function BusinessProfileModal() {
         activeChannels,
         guardrails: {
           bannedClaims: bannedClaimsInput.split(",").map((s) => s.trim()).filter(Boolean),
+          bannedKeywords: bannedKeywordsInput.split(",").map((s) => s.trim()).filter(Boolean),
           requiredDisclosures: requiredDisclosuresInput.split(",").map((s) => s.trim()).filter(Boolean),
           toneStrictness,
-          sensitivitySensitivity: sensitivityLevel,
+          sensitivityLevel,
         },
       });
 
@@ -472,6 +477,19 @@ export function BusinessProfileModal() {
                       placeholder="e.g. miracle cure, cheapest in town, instant riches"
                       value={bannedClaimsInput}
                       onChange={(e) => setBannedClaimsInput(e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Banned Keywords (Competitors / Restricted Terms)"
+                    hint="Separate keywords with commas. E.g.: CompetitorX, RivalBrand"
+                  >
+                    <input
+                      type="text"
+                      placeholder="e.g. CompetitorX, RivalApp"
+                      value={bannedKeywordsInput}
+                      onChange={(e) => setBannedKeywordsInput(e.target.value)}
                       className={inputClass}
                     />
                   </Field>

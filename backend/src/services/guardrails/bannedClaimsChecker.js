@@ -1,3 +1,5 @@
+const { escapeRegex } = require("../../utils/regex");
+
 // Baseline prohibited patterns across all workspaces (medical, deceptive financial, unverified absolutes)
 const BASELINE_BANNED_CLAIMS = [
   {
@@ -13,10 +15,6 @@ const BASELINE_BANNED_CLAIMS = [
     reason: "Absolute risk-free guarantee without qualification violates marketing standards.",
   },
 ];
-
-function escapeRegex(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 function checkBannedClaims({
   text = "",
@@ -43,7 +41,7 @@ function checkBannedClaims({
     for (const claim of workspaceBannedClaims) {
       const trimmed = (claim || "").trim();
       if (!trimmed) continue;
-      const regex = new RegExp(`\\b${escapeRegex(trimmed)}\\b`, "i");
+      const regex = new RegExp(`(?<![\\w])${escapeRegex(trimmed)}(?![\\w])`, "i");
       const match = content.match(regex);
       if (match) {
         violations.push({
@@ -61,7 +59,7 @@ function checkBannedClaims({
     for (const kw of workspaceBannedKeywords) {
       const trimmed = (kw || "").trim();
       if (!trimmed) continue;
-      const regex = new RegExp(`\\b${escapeRegex(trimmed)}\\b`, "i");
+      const regex = new RegExp(`(?<![\\w])${escapeRegex(trimmed)}(?![\\w])`, "i");
       const match = content.match(regex);
       if (match) {
         violations.push({

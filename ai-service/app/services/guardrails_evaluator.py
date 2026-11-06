@@ -5,93 +5,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BENIGN_IDIOMS = [
-    r"\bkilling\s+it\b",
-    r"\bkiller\s+(?:deal|app|product|feature|recipe|workout|outfit|content)\b",
-    r"\bcrash\s+course\b",
-    r"\bto\s+die\s+for\b",
-    r"\bdrop\s+dead\b",
-    r"\bdead\s+(?:simple|serious|on|ahead|center)\b",
-    r"\bviral\s+(?:meme|video|trend|growth|hit)\b",
-    r"\bbomb\s+(?:review|performance)\b",
-    r"\bbombarded\s+with\b",
-    r"\bslaying\s+(?:it|the\s+game)\b",
-    r"\bfired\s+up\b",
-]
-
-SENSITIVE_PATTERNS = [
-    {
-        "category": "tragedy_natural_disaster",
-        "pattern": (
-            r"\b(?:earthquake|tsunami|hurricane|tornado|wildfire|cyclone|landslide|"
-            r"devastating\s+flood)\b.*?\b(?:devastat(?:ed|ing)|death\s*toll|casualties|"
-            r"displaced|destroyed|victims?|survivors?|catastroph(?:e|ic))\b"
-        ),
-        "pattern_short": (
-            r"\b(?:deadly\s+earthquake|fatal\s+hurricane|massive\s+tsunami|"
-            r"devastating\s+wildfire|catastrophic\s+flood)\b"
-        ),
-        "reason": "Natural disaster with casualties or humanitarian emergency.",
-    },
-    {
-        "category": "mass_casualty_violence",
-        "pattern": (
-            r"\b(?:mass\s+shooting|terrorist\s+attack|bombing|airstrike|"
-            r"hostage\s+crisis|fatal\s+stabbing|suicide\s+bombing)\b"
-        ),
-        "reason": "Violent incident or mass casualty event.",
-    },
-    {
-        "category": "fatal_accident",
-        "pattern": (
-            r"\b(?:plane\s+crash|flight\s+crash|train\s+derailment|fatal\s+pileup|"
-            r"deadly\s+explosion|building\s+collapse)\b.*?\b"
-            r"(?:kills?|killed|deaths?|dead|fatalities|casualties)\b"
-        ),
-        "pattern_short": (
-            r"\b(?:fatal\s+(?:plane\s+crash|explosion|crash)|"
-            r"deadly\s+(?:train\s+derailment|collapse))\b"
-        ),
-        "reason": "Fatal transportation or industrial catastrophe.",
-    },
-    {
-        "category": "bereavement_death",
-        "pattern": (
-            r"\b(?:tragic\s+death|mourns?\s+the\s+loss|passes?\s+away\s+at|"
-            r"found\s+dead\s+in|suicide\s+death|obituary\s+for|funeral\s+services?)\b"
-        ),
-        "pattern_short": (
-            r"\b(?:mourns?\s+(?:death|loss)|passed\s+away\s+after\s+battle|"
-            r"tragically\s+died)\b"
-        ),
-        "reason": "Grief, obituary, or death of a public figure.",
-    },
-    {
-        "category": "war_armed_conflict",
-        "pattern": (
-            r"\b(?:war\s+crimes?|civilian\s+casualties|military\s+invasion|"
-            r"shelling\s+of\s+civilians|missile\s+strike\s+kills)\b"
-        ),
-        "reason": "Active war, civilian casualties, or military hostilities.",
-    },
-    {
-        "category": "scandal_abuse",
-        "pattern": (
-            r"\b(?:child\s+(?:abuse|exploitation)|sexual\s+assault\s+allegations|"
-            r"human\s+trafficking\s+bust)\b"
-        ),
-        "reason": "Severe criminal controversy or abuse allegations.",
-    },
-    {
-        "category": "civil_unrest",
-        "pattern": (
-            r"\b(?:violent\s+riots?|martial\s+law\s+declared|"
-            r"violent\s+clashes\s+leave\s+(?:\d+|several)\s+dead)\b"
-        ),
-        "reason": "Violent civil unrest or state of emergency.",
-    },
-]
-
 
 def _is_configured(key: str | None) -> bool:
     if not key:
@@ -136,43 +49,21 @@ def _get_llm_client():
 def screen_sensitivity(
     topic: str, snippet: str = "", sensitivity_level: str = "standard"
 ) -> dict:
+    """
+    LLM-backed sensitivity classifier.
+    Note: Fast-path regex screening runs locally in the Node.js backend
+    (backend/src/services/guardrails/sensitivityFilter.js) before calling this service.
+    """
     full_text = " — ".join(part for part in [topic, snippet] if part).strip()
     if not full_text:
-        return {"isSensitive": False, "category": None, "confidence": 0.0, "reason": None}
-
-    # Clean benign idioms
-    cleaned = full_text
-    for idiom in BENIGN_IDIOMS:
-        cleaned = re.sub(idiom, " benign_phrase ", cleaned, flags=re.IGNORECASE)
-
-    # 1. Rule-based evaluation
-    for item in SENSITIVE_PATTERNS:
-        has_short = item.get("pattern_short") and re.search(
-            item["pattern_short"], cleaned, flags=re.IGNORECASE
-        )
-        if re.search(item["pattern"], cleaned, flags=re.IGNORECASE) or has_short:
-            return {
-                "isSensitive": True,
-                "category": item["category"],
-                "confidence": 0.95,
-                "reason": item["reason"],
-            }
-
-    # Casualty regex (e.g. "12 killed", "hundreds dead")
-    casualty_match = re.search(
-        r"\b(?:\d+|dozens?|scores?)\s+(?:killed|dead|injured|slain)\b",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
-    if casualty_match:
         return {
-            "isSensitive": True,
-            "category": "casualty_event",
-            "confidence": 0.90,
-            "reason": f"Mentions casualties: '{casualty_match.group(0)}'.",
+            "isSensitive": False,
+            "category": None,
+            "confidence": 0.0,
+            "reason": None,
+            "source": "validation",
         }
 
-    # 2. LLM evaluation if available and text is ambiguous
     client, model = _get_llm_client()
     if client:
         try:
@@ -180,7 +71,9 @@ def screen_sensitivity(
                 "You are a brand safety filter for social media. Determine if the following "
                 "trend topic/news involves a real-world tragedy, natural disaster, death/casualty, "
                 "armed conflict, severe scandal, or crisis that would make marketing or "
-                "commercial posts insensitive or tone-deaf.\n\n"
+                "commercial posts insensitive or tone-deaf. Ignore harmless figurative idioms "
+                "like 'killing it', 'crash course', or 'to die for'.\n\n"
+                f"Sensitivity level: {sensitivity_level}\n"
                 f"Topic: {full_text}\n\n"
                 "Respond strictly in JSON format:\n"
                 '{"isSensitive": boolean, "category": string or null, "reason": string or null}'
@@ -191,7 +84,6 @@ def screen_sensitivity(
                 temperature=0.0,
             )
             content = response.choices[0].message.content.strip()
-            # Parse json safely
             json_match = re.search(r"\{.*\}", content, flags=re.DOTALL)
             if json_match:
                 import json
@@ -202,6 +94,7 @@ def screen_sensitivity(
                     "category": data.get("category"),
                     "confidence": 0.92,
                     "reason": data.get("reason"),
+                    "source": "llm",
                 }
         except Exception:
             pass
@@ -211,6 +104,7 @@ def screen_sensitivity(
         "category": None,
         "confidence": 0.1,
         "reason": None,
+        "source": "fallback",
     }
 
 
@@ -222,6 +116,7 @@ def evaluate_tone(content: str, target_tones: list, strictness: str = "moderate"
             "detectedTone": "none",
             "critique": "Draft content is empty.",
             "suggestions": ["Add text to evaluate brand tone."],
+            "source": "validation",
         }
 
     tones = target_tones if target_tones else ["professional"]
@@ -255,15 +150,17 @@ def evaluate_tone(content: str, target_tones: list, strictness: str = "moderate"
                     "detectedTone": data.get("detectedTone", ", ".join(tones)),
                     "critique": data.get("critique"),
                     "suggestions": data.get("suggestions", []),
+                    "source": "llm",
                 }
         except Exception:
             pass
 
-    # Heuristic fallback
+    # Fallback when no LLM key is configured or the upstream call fails
     return {
         "passed": True,
         "score": 0.85,
         "detectedTone": tones[0],
         "critique": None,
         "suggestions": [],
+        "source": "fallback",
     }

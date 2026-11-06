@@ -129,6 +129,7 @@ export function ContentStudio() {
       setSelectedAccountIds(socialAccounts.filter((a) => platforms.includes(a.platform)).map((a) => a.id));
       setMediaUrls(activeDraft.mediaUrls || []);
       setPreviewMediaIndex(0);
+      setGuardrailAudit(activeDraft.aiMetadata?.guardrails || null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDraft, socialAccounts]);
@@ -759,7 +760,25 @@ export function ContentStudio() {
                   }`}
                 >
                   <div className="truncate pr-2">
-                    <div className="font-semibold truncate">{d.title}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold truncate">{d.title}</span>
+                      {d.aiMetadata?.guardrails && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${
+                            d.aiMetadata.guardrails.passed
+                              ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                              : "bg-rose-500/15 text-rose-300 border border-rose-500/30"
+                          }`}
+                          title={
+                            d.aiMetadata.guardrails.passed
+                              ? `Guardrails passed (${d.aiMetadata.guardrails.score}/100)`
+                              : `${d.aiMetadata.guardrails.violations?.length || 1} guardrail violation(s) flagged`
+                          }
+                        >
+                          {d.aiMetadata.guardrails.passed ? "✓ Safe" : "⚠️ Flagged"}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[10px] text-slate-500 truncate mt-0.5">{d.body}</div>
                   </div>
                   <button

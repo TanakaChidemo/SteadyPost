@@ -112,6 +112,15 @@ describe("F09 Brand Voice and Guardrails Suite", () => {
       expect(res.passed).toBe(false);
       expect(res.violations[0].type).toBe("banned_keyword");
     });
+
+    it("matches banned phrases starting or ending with symbols (#1 rated, 50% off!, $0 down)", () => {
+      const res = checkBannedClaims({
+        text: "We are #1 rated in the city! Get 50% off! Sign up with $0 down today.",
+        workspaceBannedClaims: ["#1 rated", "50% off!", "$0 down"],
+      });
+      expect(res.passed).toBe(false);
+      expect(res.violations.map((v) => v.phrase)).toEqual(["#1 rated", "50% off!", "$0 down"]);
+    });
   });
 
   describe("2. Required Disclosures Check", () => {
@@ -145,6 +154,23 @@ describe("F09 Brand Voice and Guardrails Suite", () => {
       });
       expect(resWithDisc.passed).toBe(true);
     });
+
+    it("does not satisfy a required 'Ad' disclosure via substrings inside 'read', 'already', or 'Adobe'", () => {
+      const falsePositiveText = "If you read this already, our Adobe workflow is ready.";
+      const resFalse = checkDisclosures({
+        text: falsePositiveText,
+        workspaceRequiredDisclosures: ["Ad"],
+      });
+      expect(resFalse.passed).toBe(false);
+      expect(resFalse.missing.some((m) => m.disclosure === "Ad")).toBe(true);
+
+      const validText = "Ad: Check out our new workflow.";
+      const resValid = checkDisclosures({
+        text: validText,
+        workspaceRequiredDisclosures: ["Ad"],
+      });
+      expect(resValid.passed).toBe(true);
+    });
   });
 
   describe("3. Tone Matching & Brand Alignment", () => {
@@ -153,6 +179,31 @@ describe("F09 Brand Voice and Guardrails Suite", () => {
       expect(res.passed).toBe(false);
       expect(res.score).toBeLessThan(0.5);
       expect(res.critique).toBeTruthy();
+    });
+
+    it("ignores AI service fallback responses so local tone evaluation is preserved", async () => {
+      const origFetch = global.fetch;
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          passed: true,
+          score: 0.85,
+          detectedTone: "professional",
+          critique: null,
+          suggestions: [],
+          source: "fallback",
+        }),
+      });
+      try {
+        const res = await checkTone({
+          content: "WAIT WHAT?! THIS IS SO CRAZY!! OMG!!",
+          targetTones: ["authoritative", "professional"],
+        });
+        expect(res.passed).toBe(false);
+        expect(res.score).toBeLessThan(0.7);
+      } finally {
+        global.fetch = origFetch;
+      }
     });
 
     it("evaluates professional/authoritative tone positively for structured business copy", async () => {
@@ -200,6 +251,26 @@ describe("F09 Brand Voice and Guardrails Suite", () => {
         workspaceId: wsA.id,
       });
       expect(audit.approvalMandatory).toBe(true);
+    });
+
+    it("evaluates hashtags for disclosures (#ad) and banned keywords, and emits warnings when mediaUrls exceed 4", async () => {
+      const auditWithHashtagAd = await guardrailsService.auditDraft({
+        content: "Use promo code SAVE20 today! Past performance does not guarantee future results.",
+        hashtags: ["ad", "partner"],
+        mediaUrls: ["1.jpg", "2.jpg", "3.jpg", "4.jpg", "5.jpg"],
+        channel: "instagram",
+        workspaceId: wsA.id,
+      });
+      expect(auditWithHashtagAd.disclosures.passed).toBe(true);
+      expect(auditWithHashtagAd.warnings.some((w) => w.category === "media_limit")).toBe(true);
+
+      const auditWithBannedHashtag = await guardrailsService.auditDraft({
+        content: "Past performance does not guarantee future results.",
+        hashtags: ["partner", "CompetitorX"],
+        channel: "instagram",
+        workspaceId: wsA.id,
+      });
+      expect(auditWithBannedHashtag.bannedClaims.passed).toBe(false);
     });
 
     it("attaches guardrail audit report to aiMetadata on post create and maintains approval workflow", async () => {
@@ -309,6 +380,72 @@ describe("F09 Brand Voice and Guardrails Suite", () => {
       expect(res.status).toBe(200);
       expect(res.body.passed).toBe(true);
       expect(res.body.safePrompt).toBe("Professional modern office interior");
+    });
+
+    it("PUT /api/v1/business-profile/profile preserves bannedKeywords when updating other guardrail fields", async () => {
+      const updateRes = await request(app)
+        .put("/api/v1/business-profile/profile")
+        .set(auth(ownerA))
+        .send({
+          businessType: "B2B SaaS Consulting",
+          guardrails: {
+            bannedClaims: ["cheapest in the market", "miracle growth guarantee"],
+            requiredDisclosures: ["#partner", "Past performance does not guarantee future results"],
+            toneStrictness: "strict",
+          },
+        });
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.guardrails.bannedKeywords).toEqual(["CompetitorX"]);
+    });
+
+    it("POST /api/v1/ai/generate-caption audits each candidate individually", async () => {
+      const origFetch = global.fetch;
+      global.fetch = jest.fn().mockImplementation(async (url) => {
+        if (String(url).includes("/generate/caption")) {
+          return {
+            ok: true,
+            json: async () => ({
+              platform: "linkedin",
+              caption: "Clean strategy analysis for Q4 workflow. Past performance does not guarantee future results. #partner",
+              model: "groq-test",
+              candidates: [
+                {
+                  provider: "groq",
+                  label: "Groq",
+                  model: "groq-test",
+                  caption: "Clean strategy analysis for Q4 workflow. Past performance does not guarantee future results. #partner",
+                  status: "success",
+                  error: null,
+                },
+                {
+                  provider: "openrouter",
+                  label: "OpenRouter",
+                  model: "or-test",
+                  caption: "Try our miracle cure for diabetes today!",
+                  status: "success",
+                  error: null,
+                },
+              ],
+            }),
+          };
+        }
+        throw new Error("unavailable");
+      });
+
+      try {
+        const res = await request(app)
+          .post("/api/v1/ai/generate-caption")
+          .set(auth(ownerA))
+          .send({ topic: "Q4 growth", platform: "linkedin", tone: "professional" });
+
+        expect(res.status).toBe(200);
+        expect(res.body.candidates).toHaveLength(2);
+        expect(res.body.candidates[0].guardrails.passed).toBe(true);
+        expect(res.body.candidates[1].guardrails.passed).toBe(false);
+        expect(res.body.candidates[1].guardrails.bannedClaims.passed).toBe(false);
+      } finally {
+        global.fetch = origFetch;
+      }
     });
   });
 });

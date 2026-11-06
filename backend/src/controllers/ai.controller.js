@@ -55,10 +55,11 @@ async function generateCaption(req, res) {
   if (!topic) return res.status(400).json({ error: "topic is required" });
 
   let effectiveTone = tone;
+  let profile = null;
   let profileContext = null;
 
   if (req.workspaceId) {
-    const profile = await businessProfileModel.findByWorkspaceId(req.workspaceId);
+    profile = await businessProfileModel.findByWorkspaceId(req.workspaceId);
     if (profile) {
       if (!effectiveTone && profile.tone?.length) {
         effectiveTone = profile.tone[0];
@@ -86,18 +87,52 @@ async function generateCaption(req, res) {
   const localCaption = style.format(topic, effectiveTone);
   const captionText = aiResult ? aiResult.caption : localCaption;
 
-  const guardrails = await guardrailsService.auditDraft({
-    content: captionText || "",
-    channel: platform,
-    workspaceId: req.workspaceId,
-  });
-
   if (aiResult) {
+    let auditedCandidates = aiResult.candidates;
+    if (Array.isArray(aiResult.candidates) && aiResult.candidates.length > 0) {
+      auditedCandidates = await Promise.all(
+        aiResult.candidates.map(async (cand) => {
+          if (cand && cand.status === "success" && cand.caption) {
+            const candGuardrails = await guardrailsService.auditDraft({
+              content: cand.caption,
+              channel: platform,
+              workspaceId: req.workspaceId,
+              profile,
+            });
+            return { ...cand, guardrails: candGuardrails };
+          }
+          return { ...cand, guardrails: null };
+        })
+      );
+    }
+
+    const primaryCandidateAudit = Array.isArray(auditedCandidates)
+      ? auditedCandidates.find((c) => c.status === "success" && c.caption === captionText)?.guardrails ||
+        auditedCandidates.find((c) => c.status === "success" && c.guardrails)?.guardrails
+      : null;
+
+    const guardrails =
+      primaryCandidateAudit ||
+      (await guardrailsService.auditDraft({
+        content: captionText || "",
+        channel: platform,
+        workspaceId: req.workspaceId,
+        profile,
+      }));
+
     return res.json({
       ...aiResult,
       guardrails,
+      ...(Array.isArray(auditedCandidates) ? { candidates: auditedCandidates } : {}),
     });
   }
+
+  const guardrails = await guardrailsService.auditDraft({
+    content: localCaption || "",
+    channel: platform,
+    workspaceId: req.workspaceId,
+    profile,
+  });
 
   return res.json({
     platform,
@@ -113,6 +148,7 @@ async function generateCaption(req, res) {
         caption: localCaption,
         status: "success",
         error: null,
+        guardrails,
       },
     ],
   });
@@ -175,14 +211,22 @@ async function repurposeContent(req, res) {
     });
   }
 
-  const guardrails = {};
-  for (const [target, text] of Object.entries(activeRepurposed)) {
-    guardrails[target] = await guardrailsService.auditDraft({
-      content: text || "",
-      channel: target,
-      workspaceId: req.workspaceId,
-    });
-  }
+  const profile = req.workspaceId
+    ? await businessProfileModel.findByWorkspaceId(req.workspaceId)
+    : null;
+
+  const entries = await Promise.all(
+    Object.entries(activeRepurposed).map(async ([target, text]) => {
+      const audit = await guardrailsService.auditDraft({
+        content: text || "",
+        channel: target,
+        workspaceId: req.workspaceId,
+        profile,
+      });
+      return [target, audit];
+    })
+  );
+  const guardrails = Object.fromEntries(entries);
 
   return res.json({
     sourcePlatform,

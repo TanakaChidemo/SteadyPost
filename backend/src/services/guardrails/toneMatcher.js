@@ -98,6 +98,11 @@ async function checkTone({
 } = {}) {
   const localResult = evaluateToneLocally(content, targetTones);
 
+  // Never allow hostile/aggressive local verdict to be overridden
+  if (!localResult.passed && localResult.detectedTone === "hostile / aggressive") {
+    return localResult;
+  }
+
   let timeoutId;
   try {
     const controller = new AbortController();
@@ -112,14 +117,16 @@ async function checkTone({
 
     if (response.ok) {
       const data = await response.json();
-      return {
-        passed: Boolean(data.passed),
-        score: typeof data.score === "number" ? data.score : localResult.score,
-        detectedTone: data.detectedTone || localResult.detectedTone,
-        targetTone: targetTones,
-        critique: data.critique || null,
-        suggestions: data.suggestions || localResult.suggestions,
-      };
+      if (data && data.source !== "fallback") {
+        return {
+          passed: Boolean(data.passed),
+          score: typeof data.score === "number" ? data.score : localResult.score,
+          detectedTone: data.detectedTone || localResult.detectedTone,
+          targetTone: targetTones,
+          critique: data.critique || null,
+          suggestions: data.suggestions || localResult.suggestions,
+        };
+      }
     }
   } catch (err) {
     logger.debug({ err: err.message }, "AI service tone check unavailable, using local tone evaluator");

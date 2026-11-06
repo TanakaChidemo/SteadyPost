@@ -39,6 +39,7 @@ const profileFieldsSchema = z.object({
       requiredDisclosures: z.array(z.string().trim().max(100)).max(20).optional(),
       toneStrictness: z.enum(["strict", "moderate", "relaxed"]).optional(),
       bannedKeywords: z.array(z.string().trim().max(50)).max(100).optional(),
+      sensitivityLevel: z.enum(["conservative", "standard", "relaxed"]).optional(),
       sensitivitySensitivity: z.enum(["conservative", "standard", "relaxed"]).optional(),
     })
     .optional(),

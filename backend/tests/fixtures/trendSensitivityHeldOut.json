@@ -1,0 +1,283 @@
+[
+  {
+    "id": "heldout_sens_01",
+    "topic": "Magnitude 6.8 earthquake hits Morocco, killing hundreds in mountain villages",
+    "snippet": "Rescuers dig through rubble in the High Atlas Mountains after the strongest tremor in decades.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "heldout_sens_02",
+    "topic": "Baltimore Francis Scott Key Bridge collapses after cargo ship strike, 6 presumed dead",
+    "snippet": "Container vessel lost power before striking support pillar, sending vehicles into the Patapsco River.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "heldout_sens_03",
+    "topic": "Friends star Matthew Perry passes away at 54 in Los Angeles home",
+    "snippet": "Castmates and fans around the world pay tribute to the beloved sitcom actor.",
+    "isSensitive": true,
+    "category": "bereavement_death"
+  },
+  {
+    "id": "heldout_sens_04",
+    "topic": "Gunmen storm Moscow concert hall in terrorist attack that kills over 130",
+    "snippet": "Attackers set fire to venue roof as emergency services evacuate wounded concertgoers.",
+    "isSensitive": true,
+    "category": "mass_casualty_violence"
+  },
+  {
+    "id": "heldout_sens_05",
+    "topic": "Typhoon Yagi triggers landslides and devastating floods across Vietnam, death toll tops 60",
+    "snippet": "Thousands of homes submerged across northern provinces after super typhoon makes landfall.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "heldout_sens_06",
+    "topic": "Head-on train crash in central Greece leaves at least 36 dead",
+    "snippet": "Passenger intercity service collided with freight train near Larissa late Tuesday night.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "heldout_sens_07",
+    "topic": "UN warns of mounting civilian casualties as airstrikes hit crowded refugee camp",
+    "snippet": "Medical officials report hospitals overwhelmed by wounded families and lack of fuel.",
+    "isSensitive": true,
+    "category": "war_armed_conflict"
+  },
+  {
+    "id": "heldout_sens_08",
+    "topic": "Lahaina wildfire death toll passes 90 as search continues across Maui",
+    "snippet": "Historic town reduced to ash in the deadliest U.S. wildfire in more than a century.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "heldout_sens_09",
+    "topic": "South Korea declares national mourning after Itaewon Halloween crowd crush kills 150",
+    "snippet": "Investigators examine crowd control failures in narrow nightlife district alleys.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "heldout_sens_10",
+    "topic": "Titan submersible implosion killed all 5 aboard during Titanic expedition, Coast Guard says",
+    "snippet": "Remotely operated vehicle located tail cone and debris field on the North Atlantic seafloor.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "heldout_sens_11",
+    "topic": "Coal mine explosion in northern Turkey leaves 41 workers dead",
+    "snippet": "Methane blast hundreds of meters underground traps miners during shift change.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "heldout_sens_12",
+    "topic": "Mass shooting at Maine bowling alley and restaurant leaves 18 dead",
+    "snippet": "Hundreds of state and federal officers launch manhunt across Androscoggin County.",
+    "isSensitive": true,
+    "category": "mass_casualty_violence"
+  },
+  {
+    "id": "heldout_sens_13",
+    "topic": "Hurricane Otis batters Acapulco as Category 5 storm, leaving 27 dead",
+    "snippet": "Rapid intensification caught forecasters off guard and severed communications across Guerrero.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "heldout_sens_14",
+    "topic": "NTSB launches probe after regional passenger jet goes down in icy river",
+    "snippet": "Divers battle freezing conditions to recover flight data recorders from submerged fuselage.",
+    "isSensitive": true,
+    "category": "fatal_accident"
+  },
+  {
+    "id": "heldout_sens_15",
+    "topic": "Red Cross appeals for emergency aid as severe famine grips conflict zone",
+    "snippet": "Aid agencies warn millions of children face acute malnutrition amid blockade.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "heldout_sens_16",
+    "topic": "Wildfires force overnight evacuation of 30,000 residents and tourists on Rhodes",
+    "snippet": "Coast guard vessels and private boats rescue people stranded on smoke-filled beaches.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "heldout_sens_17",
+    "topic": "Sexual assault allegations prompt resignation of national federation president",
+    "snippet": "Prosecutors open formal inquiry following testimony from national team athletes.",
+    "isSensitive": true,
+    "category": "scandal_abuse"
+  },
+  {
+    "id": "heldout_sens_18",
+    "topic": "Violent riots erupt in capital after disputed election results, curfew imposed",
+    "snippet": "Security forces deploy tear gas as demonstrators set barricades alight across central avenues.",
+    "isSensitive": true,
+    "category": "civil_unrest"
+  },
+  {
+    "id": "heldout_sens_19",
+    "topic": "Music legend Tina Turner dies at 83 after long illness",
+    "snippet": "The Queen of Rock 'n' Roll passed away peacefully at her home in Kusnacht near Zurich.",
+    "isSensitive": true,
+    "category": "bereavement_death"
+  },
+  {
+    "id": "heldout_sens_20",
+    "topic": "Avalanche in Austrian Alps buries skiers off-piste, 5 confirmed fatalities",
+    "snippet": "Mountain rescue helicopters and dog teams deployed to Vorarlberg region.",
+    "isSensitive": true,
+    "category": "tragedy_natural_disaster"
+  },
+  {
+    "id": "heldout_safe_01",
+    "topic": "Stock market rally hits roadblock as Treasury yields surge to 16-year high",
+    "snippet": "S&P 500 retreats from session highs as investors digest latest central bank commentary.",
+    "isSensitive": false,
+    "category": "finance_markets"
+  },
+  {
+    "id": "heldout_safe_02",
+    "topic": "Apple kills off Lightning port in shift to USB-C across iPhone 15 lineup",
+    "snippet": "New charging standard aligns smartphones with iPads, Macs, and EU common charger rules.",
+    "isSensitive": false,
+    "category": "tech_hardware"
+  },
+  {
+    "id": "heldout_safe_03",
+    "topic": "Box office bombs of the summer: why big-budget sequels struggled with audiences",
+    "snippet": "Studio executives rethink franchise budgets as original mid-budget films outperform.",
+    "isSensitive": false,
+    "category": "entertainment"
+  },
+  {
+    "id": "heldout_safe_04",
+    "topic": "Startup founders share how they survived the B2B SaaS funding winter",
+    "snippet": "Focusing on net dollar retention and capital efficiency helped teams reach profitability.",
+    "isSensitive": false,
+    "category": "business_startups"
+  },
+  {
+    "id": "heldout_safe_05",
+    "topic": "Golden State Warriors survive overtime thriller to force Game 7 in playoffs",
+    "snippet": "Veteran guard drops 42 points including a buzzer-beating three-pointer in regulation.",
+    "isSensitive": false,
+    "category": "sports"
+  },
+  {
+    "id": "heldout_safe_06",
+    "topic": "Netflix password-sharing crackdown sparks surge in quarterly subscriber additions",
+    "snippet": "Streaming giant reports 8.8 million new paid memberships and raises operating margin guidance.",
+    "isSensitive": false,
+    "category": "business_media"
+  },
+  {
+    "id": "heldout_safe_07",
+    "topic": "Cybersecurity teams brace for wave of AI-generated phishing emails",
+    "snippet": "CISO survey highlights passkey adoption and zero-trust verification as top 2026 priorities.",
+    "isSensitive": false,
+    "category": "cybersecurity"
+  },
+  {
+    "id": "heldout_safe_08",
+    "topic": "How to write a killer cold email subject line without triggering spam filters",
+    "snippet": "Data from 1 million outbound B2B sequences shows short, personalized questions win.",
+    "isSensitive": false,
+    "category": "marketing_sales"
+  },
+  {
+    "id": "heldout_safe_09",
+    "topic": "Federal Reserve holds interest rates steady amid gradually cooling inflation",
+    "snippet": "Policymakers signal data-dependent approach ahead of fourth-quarter consumer spending report.",
+    "isSensitive": false,
+    "category": "economics"
+  },
+  {
+    "id": "heldout_safe_10",
+    "topic": "OpenAI DevDay keynote unveils faster multimodal models and lower API pricing",
+    "snippet": "Developers gain higher rate limits, JSON mode, and reproducible seed parameters.",
+    "isSensitive": false,
+    "category": "tech_ai"
+  },
+  {
+    "id": "heldout_safe_11",
+    "topic": "Taylor Swift Eras Tour concert film shatters global opening weekend records",
+    "snippet": "Theater chains add late-night showtimes as advance ticket sales top $100 million.",
+    "isSensitive": false,
+    "category": "entertainment"
+  },
+  {
+    "id": "heldout_safe_12",
+    "topic": "Why remote work isn't dead: hybrid schedules dominate engineering hiring",
+    "snippet": "Annual developer survey shows 78% of software teams operate distributed or 3-2 hybrid models.",
+    "isSensitive": false,
+    "category": "workplace_trends"
+  },
+  {
+    "id": "heldout_safe_13",
+    "topic": "Retailers slash prices early in October to capture holiday shopping demand",
+    "snippet": "E-commerce platforms roll out member-only flash deals ahead of Black Friday.",
+    "isSensitive": false,
+    "category": "retail"
+  },
+  {
+    "id": "heldout_safe_14",
+    "topic": "Electric vehicle battery pack costs drop 14% on falling lithium prices",
+    "snippet": "Automakers announce more affordable compact EV crossovers for commuter markets.",
+    "isSensitive": false,
+    "category": "automotive_clean_tech"
+  },
+  {
+    "id": "heldout_safe_15",
+    "topic": "Arsenal title hopes take a hit after shock 2-0 defeat at Villa Park",
+    "snippet": "Late second-half goals shake up the top of the Premier League table with six matches left.",
+    "isSensitive": false,
+    "category": "sports"
+  },
+  {
+    "id": "heldout_safe_16",
+    "topic": "3 dead simple CSS Grid layouts every frontend developer should bookmark",
+    "snippet": "Build responsive dashboard cards and sticky sidebars without complex media queries.",
+    "isSensitive": false,
+    "category": "web_development"
+  },
+  {
+    "id": "heldout_safe_17",
+    "topic": "Silent conversion killers: 5 checkout friction points costing e-commerce stores sales",
+    "snippet": "Forced account creation and surprise shipping fees remain the top drivers of cart abandonment.",
+    "isSensitive": false,
+    "category": "ecommerce_cro"
+  },
+  {
+    "id": "heldout_safe_18",
+    "topic": "Solar eclipse path of totality draws millions of skywatchers across North America",
+    "snippet": "Hotels and state parks report full occupancy along the narrow corridor of afternoon darkness.",
+    "isSensitive": false,
+    "category": "science_nature"
+  },
+  {
+    "id": "heldout_safe_19",
+    "topic": "Small business owners use short-form vertical video to explode organic reach",
+    "snippet": "Behind-the-scenes packaging clips and founder stories outperform polished studio ads.",
+    "isSensitive": false,
+    "category": "social_marketing"
+  },
+  {
+    "id": "heldout_safe_20",
+    "topic": "European Parliament passes landmark Artificial Intelligence Act",
+    "snippet": "Risk-based regulatory framework sets transparency rules for general-purpose AI systems.",
+    "isSensitive": false,
+    "category": "policy_tech"
+  }
+]
+
