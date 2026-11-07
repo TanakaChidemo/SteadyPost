@@ -65,6 +65,30 @@ export function ContentStudio() {
   // platform), so this names which stage is in flight for the button label —
   // otherwise a multi-second publish just looks like the click did nothing.
   const [publishStage, setPublishStage] = useState("");
+  const [guardrailAudit, setGuardrailAudit] = useState(null);
+  const [checkingGuardrails, setCheckingGuardrails] = useState(false);
+
+  async function handleCheckGuardrails() {
+    if (!body.trim()) {
+      return addToast("info", "Please enter post copy first to audit against brand guardrails");
+    }
+    setCheckingGuardrails(true);
+    try {
+      const res = await api.guardrails.checkDraft({
+        content: body,
+        channel: previewPlatform,
+      });
+      setGuardrailAudit(res);
+      addToast(
+        res.passed ? "success" : "info",
+        `Guardrail check: ${res.score}/100 (${res.passed ? "Passed" : "Issues flagged"})`
+      );
+    } catch (err) {
+      addToast("error", err.message || "Failed to check guardrails");
+    } finally {
+      setCheckingGuardrails(false);
+    }
+  }
 
   // Draft metadata still stores platform *types* (instagram/facebook), not
   // specific accounts — derive that list from whatever's currently selected.
@@ -105,6 +129,7 @@ export function ContentStudio() {
       setSelectedAccountIds(socialAccounts.filter((a) => platforms.includes(a.platform)).map((a) => a.id));
       setMediaUrls(activeDraft.mediaUrls || []);
       setPreviewMediaIndex(0);
+      setGuardrailAudit(activeDraft.aiMetadata?.guardrails || null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDraft, socialAccounts]);
@@ -416,10 +441,93 @@ export function ContentStudio() {
               <textarea
                 rows={7}
                 value={body}
-                onChange={(e) => setBody(e.target.value)}
+                onChange={(e) => {
+                  setBody(e.target.value);
+                  if (guardrailAudit) setGuardrailAudit(null);
+                }}
                 placeholder='Write your post here or click "Write with AI" to generate captions, hashtags, and variations...'
                 className="w-full px-4 py-3 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 leading-relaxed font-sans"
               />
+
+              {/* Guardrails Check Trigger & Audit Panel */}
+              <div className="pt-2">
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={handleCheckGuardrails}
+                    disabled={checkingGuardrails || !body.trim()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-semibold text-slate-300 disabled:opacity-40 transition"
+                  >
+                    <span>🛡️</span>
+                    <span>{checkingGuardrails ? "Checking Brand Guardrails..." : "Check Brand Guardrails"}</span>
+                  </button>
+
+                  {guardrailAudit && (
+                    <span
+                      className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                        guardrailAudit.passed
+                          ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+                          : "bg-rose-500/10 text-rose-300 border border-rose-500/30"
+                      }`}
+                    >
+                      Score: {guardrailAudit.score}/100 — {guardrailAudit.passed ? "PASSED" : "ISSUES FLAGGED"}
+                    </span>
+                  )}
+                </div>
+
+                {guardrailAudit && (
+                  <div className="mt-3 p-3.5 rounded-lg bg-slate-950 border border-slate-800 space-y-2 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="p-2 rounded bg-slate-900/60 border border-slate-800/80">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Tone Match</span>
+                        <span className={guardrailAudit.tone?.passed ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>
+                          {guardrailAudit.tone?.passed ? "✓ Matches Profile" : "✗ Tone Drift Detected"}
+                        </span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Target: {guardrailAudit.tone?.targetTone?.join(", ") || "professional"}
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-slate-900/60 border border-slate-800/80">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Banned Claims</span>
+                        <span className={guardrailAudit.bannedClaims?.passed ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
+                          {guardrailAudit.bannedClaims?.passed ? "✓ Clear" : `✗ ${guardrailAudit.bannedClaims?.violations?.length} Violation(s)`}
+                        </span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          No unauthorized guarantees or baseline claims
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-slate-900/60 border border-slate-800/80">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Disclosures</span>
+                        <span className={guardrailAudit.disclosures?.passed ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>
+                          {guardrailAudit.disclosures?.passed ? "✓ Clear" : `✗ Missing Disclosures`}
+                        </span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          FTC #ad / #sponsored / legal tags
+                        </p>
+                      </div>
+                    </div>
+
+                    {guardrailAudit.violations?.length > 0 && (
+                      <div className="p-2 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px] space-y-1">
+                        <span className="font-bold block">Issues to Resolve:</span>
+                        {guardrailAudit.violations.map((v, i) => (
+                          <div key={i} className="flex items-start gap-1.5">
+                            <span>•</span>
+                            <span>{v.message || v.reason || v.phrase || "Policy violation"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="text-[10px] text-slate-400 flex items-center justify-between border-t border-slate-900 pt-1.5">
+                      <span>Approval remains mandatory even when guardrails pass.</span>
+                      <span className="text-indigo-400 font-medium">Safety Net Active</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Media Attachment */}
@@ -652,7 +760,25 @@ export function ContentStudio() {
                   }`}
                 >
                   <div className="truncate pr-2">
-                    <div className="font-semibold truncate">{d.title}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold truncate">{d.title}</span>
+                      {d.aiMetadata?.guardrails && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${
+                            d.aiMetadata.guardrails.passed
+                              ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                              : "bg-rose-500/15 text-rose-300 border border-rose-500/30"
+                          }`}
+                          title={
+                            d.aiMetadata.guardrails.passed
+                              ? `Guardrails passed (${d.aiMetadata.guardrails.score}/100)`
+                              : `${d.aiMetadata.guardrails.violations?.length || 1} guardrail violation(s) flagged`
+                          }
+                        >
+                          {d.aiMetadata.guardrails.passed ? "✓ Safe" : "⚠️ Flagged"}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[10px] text-slate-500 truncate mt-0.5">{d.body}</div>
                   </div>
                   <button

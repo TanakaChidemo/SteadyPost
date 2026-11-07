@@ -241,4 +241,9 @@ export const api = {
     repurpose: (data) => apiClient.post("/ai/repurpose", data).then((r) => r.data),
     generateVariants: (data) => apiClient.post("/posts/generate-variants", data).then((r) => r.data),
   },
+  guardrails: {
+    checkDraft: (data) => apiClient.post("/guardrails/check-draft", data).then((r) => r.data),
+    checkTrend: (data) => apiClient.post("/guardrails/check-trend", data).then((r) => r.data),
+    checkImage: (data) => apiClient.post("/guardrails/check-image", data).then((r) => r.data),
+  },
 };
