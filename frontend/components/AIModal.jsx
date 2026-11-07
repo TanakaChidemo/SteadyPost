@@ -54,7 +54,8 @@ function GuardrailsAuditCard({ report, onReaudit, loading }) {
   if (!report && !loading) {
     if (!onReaudit) return null;
     return (
-      <div className="pt-2">
+      <div className="pt-2 flex items-center justify-between">
+        <span className="text-[11px] text-slate-400 italic">Not audited yet</span>
         <button
           type="button"
           onClick={onReaudit}
@@ -558,7 +559,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
               });
               return { ...cand, guardrails: audit };
             } catch {
-              return { ...cand, guardrails: res.guardrails || null };
+              return { ...cand, guardrails: null };
             }
           }
           return cand;
@@ -572,9 +573,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
       );
       const chosenIdx = firstSuccess >= 0 ? firstSuccess : 0;
       setSelectedCandidateIndex(chosenIdx);
-      setModelGuardrails(
-        auditedCandidates[chosenIdx]?.guardrails || res.guardrails || null
-      );
+      setModelGuardrails(auditedCandidates[chosenIdx]?.guardrails || null);
       addToast(
         "success",
         `Evaluated copy across ${auditedCandidates.filter((c) => c.status === "success").length} models!`
@@ -1193,7 +1192,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
 
                     {/* F09 Brand Guardrails & Voice Audit */}
                     <GuardrailsAuditCard
-                      report={selectedCandidate.guardrails ?? modelGuardrails}
+                      report={selectedCandidate.guardrails || null}
                       onReaudit={() => handleAuditCandidate(selectedCandidate)}
                     />
 

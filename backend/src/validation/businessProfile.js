@@ -40,7 +40,6 @@ const profileFieldsSchema = z.object({
       toneStrictness: z.enum(["strict", "moderate", "relaxed"]).optional(),
       bannedKeywords: z.array(z.string().trim().max(50)).max(100).optional(),
       sensitivityLevel: z.enum(["conservative", "standard", "relaxed"]).optional(),
-      sensitivitySensitivity: z.enum(["conservative", "standard", "relaxed"]).optional(),
     })
     .optional(),
   // Set by the last step of the onboarding wizard.

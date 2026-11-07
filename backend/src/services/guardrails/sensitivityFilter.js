@@ -37,7 +37,7 @@ const SENSITIVE_PATTERNS = [
   },
   {
     category: "bereavement_death",
-    pattern: /\b(?:tragic\s+death|mourns?\s+the\s+loss|passes?\s+away\s+at|found\s+dead\s+in|suicide\s+death|obituary\s+for|funeral\s+services?)\b/i,
+    pattern: /\b(?:tragic\s+death|mourns?\s+the\s+loss|passes?\s+away\s+at|(?:dies?|died)\s+at\s+\d+|found\s+dead\s+in|suicide\s+death|obituary\s+for|funeral\s+services?)\b/i,
     patternShort: /\b(?:mourns?\s+(?:death|loss)|passed\s+away\s+after\s+battle|tragically\s+died)\b/i,
     reason: "Grief, obituary, or death of a public figure.",
   },
@@ -93,8 +93,10 @@ function evaluateLocally(text, sensitivityLevel = "standard") {
     }
   }
 
-  // Check direct casualty pairing (e.g. "14 confirmed fatalities", "45 passengers dead")
-  const casualtyMatch = sanitized.match(/\b(?:\d+|dozens?|scores?|hundreds?)\s+(?:(?:\w+\s+)?(?:killed|dead|fatalities|casualties)|slain)\b/i);
+  // Check direct casualty pairing (e.g. "14 confirmed fatalities", "45 passengers dead", "killing hundreds", "kills 150", "killed all 5")
+  const casualtyMatch = sanitized.match(
+    /\b(?:(?:\d+|dozens?|scores?|hundreds?|thousands?)\s+(?:(?:\w+\s+)?(?:killed|dead|fatalities|casualties)|slain)|(?:kills?|killing|killed)(?:\s+(?:all|over|at\s+least|more\s+than|nearly|up\s+to))?\s+(?:\d+|dozens?|scores?|hundreds?|thousands?))\b/i
+  );
   if (casualtyMatch) {
     return {
       isSensitive: true,

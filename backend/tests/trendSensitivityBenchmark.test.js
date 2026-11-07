@@ -107,7 +107,7 @@ describe("F09 Trend Sensitivity Filter Benchmark (Evaluation Plan)", () => {
     expect(devMetrics.falseAlarmRate).toBeLessThanOrEqual(0.10);
 
     // Held-out real-world headline set bar (honest generalization without overfitting)
-    expect(heldOutMetrics.recall).toBeGreaterThanOrEqual(0.55);
+    expect(heldOutMetrics.recall).toBeGreaterThanOrEqual(0.75);
     expect(heldOutMetrics.falseAlarmRate).toBeLessThanOrEqual(0.10);
   });
 });

@@ -13,7 +13,7 @@ async function auditDraft({
   content = "",
   channel = "instagram",
   hashtags = [],
-  mediaUrls = [],
+  mediaUrls: _mediaUrls = [],
   workspaceId = null,
   profile = null,
 } = {}) {
@@ -74,13 +74,6 @@ async function auditDraft({
   }
 
   const warnings = [];
-  if (Array.isArray(mediaUrls) && mediaUrls.length > 4) {
-    warnings.push({
-      category: "media_limit",
-      message: `Attached ${mediaUrls.length} media files; social platforms allow up to 4 per post.`,
-    });
-  }
-
   const allPassed = violations.length === 0;
 
   // Compute composite score (0 - 100)
@@ -120,10 +113,7 @@ async function auditTrend({
     effectiveProfile = await businessProfileModel.findByWorkspaceId(workspaceId);
   }
 
-  const sensitivityLevel =
-    effectiveProfile?.guardrails?.sensitivityLevel ||
-    effectiveProfile?.guardrails?.sensitivitySensitivity ||
-    "standard";
+  const sensitivityLevel = effectiveProfile?.guardrails?.sensitivityLevel || "standard";
   const result = await checkTrendSensitivity({ topic, snippet, sensitivityLevel });
 
   return {

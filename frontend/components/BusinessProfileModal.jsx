@@ -122,9 +122,7 @@ export function BusinessProfileModal() {
             setBannedKeywordsInput((prof.guardrails.bannedKeywords || []).join(", "));
             setRequiredDisclosuresInput((prof.guardrails.requiredDisclosures || []).join(", "));
             setToneStrictness(prof.guardrails.toneStrictness || "moderate");
-            setSensitivityLevel(
-              prof.guardrails.sensitivityLevel || prof.guardrails.sensitivitySensitivity || "standard"
-            );
+            setSensitivityLevel(prof.guardrails.sensitivityLevel || "standard");
           }
         }
         if (notif) {

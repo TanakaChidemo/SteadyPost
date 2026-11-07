@@ -650,25 +650,43 @@ async function batchCreate(req, res) {
     return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
   }
 
-  const itemsToInsert = parsed.data.posts.map((item) => ({
-    workspaceId: req.workspaceId,
-    ownerId: req.user.id,
-    channel: item.channel,
-    platforms: [item.channel],
-    title: item.title || `Post for ${item.channel}`,
-    body: item.body,
-    mediaUrls: item.mediaUrls || [],
-    hashtags: item.hashtags || [],
-    status: "draft",
-    aiMetadata: item.aiMetadata || {},
-    versions: [
-      {
+  const profile = req.workspaceId ? await businessProfileModel.findByWorkspaceId(req.workspaceId) : null;
+
+  const itemsToInsert = await Promise.all(
+    parsed.data.posts.map(async (item) => {
+      const guardrails = await guardrailsService.auditDraft({
+        content: item.body,
+        channel: item.channel,
+        mediaUrls: item.mediaUrls || [],
+        hashtags: item.hashtags || [],
+        workspaceId: req.workspaceId,
+        profile,
+      });
+
+      return {
+        workspaceId: req.workspaceId,
+        ownerId: req.user.id,
+        channel: item.channel,
+        platforms: [item.channel],
+        title: item.title || `Post for ${item.channel}`,
         body: item.body,
-        editedAt: new Date(),
-        editedBy: req.user.id,
-      },
-    ],
-  }));
+        mediaUrls: item.mediaUrls || [],
+        hashtags: item.hashtags || [],
+        status: "draft",
+        aiMetadata: {
+          ...(item.aiMetadata || {}),
+          guardrails,
+        },
+        versions: [
+          {
+            body: item.body,
+            editedAt: new Date(),
+            editedBy: req.user.id,
+          },
+        ],
+      };
+    })
+  );
 
   const createdDrafts = await contentDraftModel.createMany(itemsToInsert);
   return res.status(201).json({ items: createdDrafts });

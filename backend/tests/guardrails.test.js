@@ -253,7 +253,7 @@ describe("F09 Brand Voice and Guardrails Suite", () => {
       expect(audit.approvalMandatory).toBe(true);
     });
 
-    it("evaluates hashtags for disclosures (#ad) and banned keywords, and emits warnings when mediaUrls exceed 4", async () => {
+    it("evaluates hashtags for disclosures (#ad) and banned keywords", async () => {
       const auditWithHashtagAd = await guardrailsService.auditDraft({
         content: "Use promo code SAVE20 today! Past performance does not guarantee future results.",
         hashtags: ["ad", "partner"],
@@ -262,7 +262,7 @@ describe("F09 Brand Voice and Guardrails Suite", () => {
         workspaceId: wsA.id,
       });
       expect(auditWithHashtagAd.disclosures.passed).toBe(true);
-      expect(auditWithHashtagAd.warnings.some((w) => w.category === "media_limit")).toBe(true);
+      expect(auditWithHashtagAd.warnings).toEqual([]);
 
       const auditWithBannedHashtag = await guardrailsService.auditDraft({
         content: "Past performance does not guarantee future results.",
@@ -382,7 +382,7 @@ describe("F09 Brand Voice and Guardrails Suite", () => {
       expect(res.body.safePrompt).toBe("Professional modern office interior");
     });
 
-    it("PUT /api/v1/business-profile/profile preserves bannedKeywords when updating other guardrail fields", async () => {
+    it("PUT /api/v1/business-profile/profile preserves bannedKeywords and stores sensitivityLevel without sensitivitySensitivity", async () => {
       const updateRes = await request(app)
         .put("/api/v1/business-profile/profile")
         .set(auth(ownerA))
@@ -392,10 +392,65 @@ describe("F09 Brand Voice and Guardrails Suite", () => {
             bannedClaims: ["cheapest in the market", "miracle growth guarantee"],
             requiredDisclosures: ["#partner", "Past performance does not guarantee future results"],
             toneStrictness: "strict",
+            sensitivityLevel: "conservative",
           },
         });
       expect(updateRes.status).toBe(200);
       expect(updateRes.body.guardrails.bannedKeywords).toEqual(["CompetitorX"]);
+      expect(updateRes.body.guardrails.sensitivityLevel).toBe("conservative");
+      expect(updateRes.body.guardrails.sensitivitySensitivity).toBeUndefined();
+    });
+
+    it("ignores client-supplied aiMetadata.guardrails and always audits on server in draft create, update, and batchCreate", async () => {
+      // 1. POST /api/v1/content (create)
+      const createRes = await request(app)
+        .post("/api/v1/content")
+        .set(auth(ownerA))
+        .send({
+          title: "Spoofed Draft",
+          body: "This miracle cure works instantly!",
+          platforms: ["instagram"],
+          aiMetadata: {
+            provider: "custom",
+            guardrails: { passed: true, score: 100 },
+          },
+        });
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.aiMetadata.provider).toBe("custom");
+      expect(createRes.body.aiMetadata.guardrails.passed).toBe(false);
+      expect(createRes.body.aiMetadata.guardrails.bannedClaims.passed).toBe(false);
+
+      // 2. PUT /api/v1/content/:id (update attempting to spoof guardrails without changing body)
+      const updateRes = await request(app)
+        .put(`/api/v1/content/${createRes.body._id}`)
+        .set(auth(ownerA))
+        .send({
+          aiMetadata: {
+            guardrails: { passed: true, score: 100 },
+          },
+        });
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.aiMetadata.guardrails.passed).toBe(false);
+
+      // 3. POST /api/v1/posts/batch-create
+      const batchRes = await request(app)
+        .post("/api/v1/posts/batch-create")
+        .set(auth(ownerA))
+        .send({
+          posts: [
+            {
+              title: "Spoofed Batch Draft",
+              body: "This miracle cure works instantly!",
+              channel: "instagram",
+              aiMetadata: {
+                guardrails: { passed: true, score: 100 },
+              },
+            },
+          ],
+        });
+      expect(batchRes.status).toBe(201);
+      expect(batchRes.body.items[0].aiMetadata.guardrails.passed).toBe(false);
+      expect(batchRes.body.items[0].aiMetadata.guardrails.bannedClaims.passed).toBe(false);
     });
 
     it("POST /api/v1/ai/generate-caption audits each candidate individually", async () => {
