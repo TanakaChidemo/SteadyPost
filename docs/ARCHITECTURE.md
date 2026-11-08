@@ -86,31 +86,52 @@ social accounts, and a sample draft are seeded once at boot
 ([`backend/src/data/seed.js`](../backend/src/data/seed.js)) if they do not
 already exist.
 
-The publish *job* itself is still in-process (`setImmediate` in
-`src/queue/`) — there is no Redis/Bull. Restarting the backend does not
-wipe MongoDB, but it does drop any publish job that was mid-flight.
+The publish job and metrics collection are handled by a unified queue architecture
+([`backend/src/queue/`](../backend/src/queue/)). When Redis is configured (`REDIS_URL` or
+`REDIS_HOST`), BullMQ (`bullmq`) manages distributed scheduling and workers. In local dev
+and test environments without Redis, an in-memory event-driven queue (`InMemoryJobQueue`)
+provides identical semantics with exponential backoff retries, delayed scheduling, and job cancellation.
 
-## Publishing engine flow
+## Publishing engine flow (#10)
 
-1. User hits `/publish/now` with a `contentDraftId`, `platform`, and
-   optional `socialAccountId`.
-2. Backend looks up the draft, inserts a `scheduledposts` row with status
-   `publishing`, and schedules an in-process publish job (`src/queue/`)
-   with zero delay.
-3. The same backend process picks up the job via `setImmediate` and
-   dispatches to the platform-specific publisher
-   (`src/services/publishers/metaPublisher.js`).
-4. `metaPublisher` calls the real Facebook/Instagram Graph API only if
-   `META_APP_ID` is set *and* a `socialAccountId` is provided; otherwise
-   ("sandbox mode") it simulates a successful publish and returns a fake
-   external post ID. Live publishes use the stored Page access token.
-5. The job processor writes the result (`published`/`failed`,
-   `externalPostId`, `errorMessage`) back onto the same `scheduledposts`
-   row, which `/publish/status/:id` reads back.
+1. User/owner triggers publishing via `/posts/publish-approved`, `/posts/:id/publish-now`,
+   or `/publish/now`.
+2. Workspace ownership check (`validateAccountWorkspaceOwnership` in
+   [`backend/src/utils/workspaceValidation.js`](../backend/src/utils/workspaceValidation.js)):
+   ensures each selected social account belongs to the requester's active workspace before
+   queuing, preventing cross-tenant publishing vulnerabilities. Role-based access enforces
+   that only workspace owners can trigger publication.
+3. Post state updates to `scheduled` (or `publishing`), and a job is queued via
+   `enqueuePublishJob(...)`. If a future `scheduledAt` timestamp is provided, execution is
+   delayed by `scheduledAt - now`; otherwise delay is 0.
+4. The queue worker (`publishProcessor.js`) executes the job:
+   - Resolves workspace credentials for the target platform.
+   - Looks up the platform adapter from `adapterRegistry` (`MetaAdapter`, `TwitterAdapter`,
+     `LinkedInAdapter`, `GbpAdapter` for GBP Local Posts #13).
+   - Calls the adapter's `publish(...)` method. In live mode with credentials, calls the
+     real platform API; in sandbox mode, safely simulates publishing and returns a mock external ID.
+   - On success: marks post as `published`, sets `publishedAt` and `externalPostId`.
+   - On failure: retries with exponential backoff up to `maxRetries` (default 3). If all retries
+     exhaust, marks post as `failed` with descriptive `errorMessage`.
+5. Metrics collection:
+   - Immediately following successful publication, the adapter's `getMetrics(...)` is invoked
+     to collect initial engagement metrics (reach, likes, comments, shares, clicks), persisted
+     to `PostMetrics`.
+   - Periodic or delayed metrics jobs are enqueued via `enqueueMetricsJob(...)` to track post
+     performance over time.
 
-Because the job delay is zero, this flow is really "publish now" with an
-async-shaped API — there's no scheduled/delayed publishing exposed in the
-UI or API.
+## Platform adapter architecture
+
+Every publishing channel inherits from `BaseAdapter`
+([`backend/src/services/publishers/BaseAdapter.js`](../backend/src/services/publishers/BaseAdapter.js)):
+- **Consistent interface**: `publish(params)`, `getMetrics(params)`, `validateCredentials(account)`.
+- **Swappable & mockable**: Registered in `adapterRegistry`, enabling unit tests to swap or mock
+  adapters without hitting external APIs or network dependencies.
+- **Unified omnichannel channels**:
+  - Meta (`facebook`, `instagram`)
+  - Twitter / X (`twitter`)
+  - LinkedIn (`linkedin`)
+  - Google Business Profile (`gbp`) for Local Posts (#13) with CTA buttons and offers.
 
 ## AI microservice boundary
 
@@ -139,15 +160,10 @@ page refresh: it was never written anywhere durable.
 ## Known limitations (intentional at this stage)
 
 - No object storage for uploaded media (base64 in memory only).
-- Publish jobs are in-process only; a backend restart drops in-flight
-  publishes (MongoDB rows survive).
-- Sandbox social accounts (no Page token) cannot hit the real Graph API.
-- Dashboard quick publish (`frontend/app/dashboard/page.jsx`) omits
-  `socialAccountId`, so that path always uses the sandbox simulator.
+- When running in local development mode without Redis, in-memory queue timers
+  do not persist across process restarts; in production with `REDIS_URL` or
+  `REDIS_HOST`, BullMQ provides durable persistence.
+- Sandbox social accounts (no live token) run against the sandbox simulators.
 - Live Instagram publish sends `image_url`; uploads in this app are `data:`
   URLs, which Graph cannot fetch. Facebook `/photos` already uploads those
   as multipart `source`.
-- Only Facebook and Instagram are supported anywhere in the app (AI
-  generation, publish destinations).
-- Automated tests are thin: backend has a health check
-  (`backend/tests/health.test.js`); CI also lints and builds the frontend.
