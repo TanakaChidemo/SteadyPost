@@ -33,6 +33,15 @@ const profileFieldsSchema = z.object({
   tone: uniqueList(TONES).optional(),
   goals: uniqueList(GOALS).optional(),
   activeChannels: uniqueList(CHANNELS).optional(),
+  guardrails: z
+    .object({
+      bannedClaims: z.array(z.string().trim().max(100)).max(50).optional(),
+      requiredDisclosures: z.array(z.string().trim().max(100)).max(20).optional(),
+      toneStrictness: z.enum(["strict", "moderate", "relaxed"]).optional(),
+      bannedKeywords: z.array(z.string().trim().max(50)).max(100).optional(),
+      sensitivityLevel: z.enum(["conservative", "standard", "relaxed"]).optional(),
+    })
+    .optional(),
   // Set by the last step of the onboarding wizard.
   onboardingCompleted: z.literal(true).optional(),
 });

@@ -4,6 +4,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 
 from app.routes.generate import generate_bp
+from app.routes.guardrails import guardrails_bp
 
 load_dotenv()
 
@@ -13,6 +14,7 @@ def create_app():
     CORS(app)
 
     app.register_blueprint(generate_bp, url_prefix="/generate")
+    app.register_blueprint(guardrails_bp, url_prefix="/guardrails")
 
     @app.get("/health")
     def health():
