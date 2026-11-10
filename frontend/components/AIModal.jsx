@@ -9,12 +9,13 @@ import {
   FacebookIcon,
   TwitterIcon,
   LinkedInIcon,
+  GoogleIcon,
   CheckIcon,
   RefreshIcon,
   SpinnerIcon,
 } from "./Icons";
 
-// Only networks where publishing is currently supported
+// Supported omnichannel targets matching backend publishing adapters (#10 & #13)
 const AVAILABLE_CHANNELS = [
   {
     id: "instagram",
@@ -30,6 +31,27 @@ const AVAILABLE_CHANNELS = [
     maxChars: 5000,
     color: "text-indigo-400 border-indigo-500/40 bg-indigo-500/10",
   },
+  {
+    id: "twitter",
+    label: "Twitter / X",
+    icon: TwitterIcon,
+    maxChars: 280,
+    color: "text-sky-400 border-sky-500/40 bg-sky-500/10",
+  },
+  {
+    id: "linkedin",
+    label: "LinkedIn",
+    icon: LinkedInIcon,
+    maxChars: 3000,
+    color: "text-blue-400 border-blue-500/40 bg-blue-500/10",
+  },
+  {
+    id: "gbp",
+    label: "Google Business",
+    icon: GoogleIcon,
+    maxChars: 1500,
+    color: "text-amber-400 border-amber-500/40 bg-amber-500/10",
+  },
 ];
 
 const MULTI_MODEL_PLATFORMS = [
@@ -37,6 +59,7 @@ const MULTI_MODEL_PLATFORMS = [
   { id: "facebook", label: "Facebook", icon: FacebookIcon },
   { id: "twitter", label: "Twitter / X", icon: TwitterIcon },
   { id: "linkedin", label: "LinkedIn", icon: LinkedInIcon },
+  { id: "gbp", label: "GBP", icon: GoogleIcon },
 ];
 
 // Single unified tone list matching the Business Profile
@@ -766,7 +789,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
                   Target Networks
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {AVAILABLE_CHANNELS.map((ch) => {
                     const isSelected = writeChannels.includes(ch.id);
                     const Icon = ch.icon;
@@ -1003,7 +1026,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
                   Target Platform
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
                   {MULTI_MODEL_PLATFORMS.map((p) => {
                     const Icon = p.icon;
                     const isSelected = modelPlatform === p.id;
@@ -1277,8 +1300,8 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
               <div className="p-8 rounded-lg bg-slate-950 border border-slate-800 text-center space-y-3">
                 <p className="text-xs text-slate-300 font-medium">No published posts yet.</p>
                 <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-                  Once you publish posts to Instagram or Facebook, your top-performing content
-                  will appear here so you can easily turn winning posts into fresh updates.
+                  Once you publish posts across your connected channels, your top-performing
+                  content will appear here so you can easily turn winning posts into fresh updates.
                 </p>
                 <button
                   onClick={() => setActiveTab("write")}
@@ -1354,7 +1377,7 @@ export function AIModal({ onInsert, initialContent, onDraftCreated }) {
                     <label className="block text-xs font-semibold text-slate-400">
                       Target Networks
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {AVAILABLE_CHANNELS.map((ch) => {
                         const isSelected = repurposeChannels.includes(ch.id);
                         const Icon = ch.icon;

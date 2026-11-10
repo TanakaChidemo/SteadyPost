@@ -14,6 +14,8 @@ router.post("/generate-variants", requireWorkspaceRole("owner", "editor"), contr
 router.post("/batch-create", requireWorkspaceRole("owner", "editor"), controller.batchCreate);
 router.post("/publish-approved", requireWorkspaceRole("owner"), controller.publishApproved);
 router.get("/:id", controller.getById);
+router.get("/:id/metrics", controller.getPostMetrics);
+router.post("/:id/metrics/refresh", requireWorkspaceRole("owner", "editor"), controller.refreshPostMetrics);
 router.put("/:id", requireWorkspaceRole("owner", "editor"), controller.update);
 router.post("/:id/repurpose", requireWorkspaceRole("owner", "editor"), controller.repurposePost);
 router.post("/:id/submit-approval", requireWorkspaceRole("owner", "editor"), controller.submitApproval);

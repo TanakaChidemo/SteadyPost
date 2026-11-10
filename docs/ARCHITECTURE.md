@@ -3,24 +3,29 @@
 ## System overview
 
 ```
-┌─────────────┐      ┌──────────────────┐      ┌────────────────┐
-│  Next.js 14 │──────▶  Express API GW  │──────▶  Flask AI svc   │
-│  (frontend) │◀──────│  (backend)       │◀──────│  (ai-service)  │
-└─────────────┘      └────────┬─────────┘      └────────┬────────┘
-                               │                          │
-                               ▼                          ▼
-                     ┌──────────────────┐          ┌──────────┐
-                     │ MongoDB          │          │  Groq /  │
-                     │ users, accounts, │          │  OpenAI  │
-                     │ drafts, posts    │          └──────────┘
+┌─────────────┐      ┌──────────────────┐      ┌────────────────────────┐
+│  Next.js 14 │──────▶  Express API GW  │──────▶  LLM Adapter Interface │
+│  (frontend) │◀──────│  (backend)       │◀──────│  (AiServiceLlmAdapter) │
+└─────────────┘      └────────┬─────────┘      └───────────┬────────────┘
+                               │                            ▼
+                               │                   ┌────────────────┐
+                               │                   │ Flask AI svc   │
+                               │                   │ (Groq / OpenAI)│
+                               ▼                   └────────────────┘
+                     ┌──────────────────┐
+                     │ MongoDB + BullMQ │
+                     │ users, accounts, │
+                     │ drafts, posts,   │
+                     │ PostMetrics      │
                      └────────┬─────────┘
-                               │
-                               ▼
-                     ┌──────────────────────┐
-                     │ Meta Graph API        │
-                     │ (Facebook + Instagram)│
-                     │ or sandbox simulator  │
-                     └──────────────────────┘
+                              │
+                              ▼
+                     ┌───────────────────────────────┐
+                     │ Platform Publishing Adapters  │
+                     │ Meta (FB/IG), X, LinkedIn,    │
+                     │ GBP Local Posts (#13),        │
+                     │ or sandbox simulators         │
+                     └───────────────────────────────┘
 ```
 
 ## OAuth login (app identity)
@@ -95,33 +100,39 @@ provides identical semantics with exponential backoff retries, delayed schedulin
 ## Publishing engine flow (#10)
 
 1. User/owner triggers publishing via `/posts/publish-approved`, `/posts/:id/publish-now`,
-   or `/publish/now`.
+   or `/publish/now` (supporting immediate publish, future `scheduledAt` delays,
+   2-3+ connected channels simultaneously, and GBP Local Posts #13 `options`).
 2. Workspace ownership check (`validateAccountWorkspaceOwnership` in
    [`backend/src/utils/workspaceValidation.js`](../backend/src/utils/workspaceValidation.js)):
    ensures each selected social account belongs to the requester's active workspace before
    queuing, preventing cross-tenant publishing vulnerabilities. Role-based access enforces
-   that only workspace owners can trigger publication.
-3. Post state updates to `scheduled` (or `publishing`), and a job is queued via
-   `enqueuePublishJob(...)`. If a future `scheduledAt` timestamp is provided, execution is
-   delayed by `scheduledAt - now`; otherwise delay is 0.
+   that only workspace owners can trigger publication (`requireWorkspaceRole("owner")`), while
+   workspace editors can author drafts/posts and submit them for owner approval.
+3. Post state updates to `scheduled` (when `delay > 0`) or `publishing` (when immediate), and a
+   job is queued via `enqueuePublishJob(...)` with exponential backoff retries (`maxRetries`/`attempts`).
 4. The queue worker (`publishProcessor.js`) executes the job:
-   - Resolves workspace credentials for the target platform.
+   - Resolves workspace credentials strictly scoped to `workspaceId` (with safe sandbox fallback
+     only when no live token exists).
    - Looks up the platform adapter from `adapterRegistry` (`MetaAdapter`, `TwitterAdapter`,
      `LinkedInAdapter`, `GbpAdapter` for GBP Local Posts #13).
    - Calls the adapter's `publish(...)` method. In live mode with credentials, calls the
      real platform API; in sandbox mode, safely simulates publishing and returns a mock external ID.
-   - On success: marks post as `published`, sets `publishedAt` and `externalPostId`.
-   - On failure: retries with exponential backoff up to `maxRetries` (default 3). If all retries
-     exhaust, marks post as `failed` with descriptive `errorMessage`.
+   - On success: marks post as `published`, sets `publishedAt` and `externalPostId`, and clears
+     any prior `errorMessage`.
+   - On failure: retries with exponential backoff up to `maxRetries` / BullMQ `attempts` (default 3).
+     If all retries exhaust, marks post as `failed` with descriptive `errorMessage`.
+   - On server shutdown, `closeQueues()` cleanly closes BullMQ workers/queues and clears in-memory timers.
 5. Metrics collection:
    - Immediately following successful publication, the adapter's `getMetrics(...)` is invoked
      to collect initial engagement metrics (reach, likes, comments, shares, clicks), persisted
      to `PostMetrics`.
-   - Periodic or delayed metrics jobs are enqueued via `enqueueMetricsJob(...)` to track post
-     performance over time.
+   - Delayed follow-up metrics jobs are automatically enqueued via `enqueueMetricsJob(...)` to track
+     post performance over time, and workspace members can inspect or trigger fresh snapshots via
+     `GET /api/v1/posts/:id/metrics` and `POST /api/v1/posts/:id/metrics/refresh`.
 
-## Platform adapter architecture
+## Platform & LLM adapter architecture
 
+### Platform publishing adapters
 Every publishing channel inherits from `BaseAdapter`
 ([`backend/src/services/publishers/BaseAdapter.js`](../backend/src/services/publishers/BaseAdapter.js)):
 - **Consistent interface**: `publish(params)`, `getMetrics(params)`, `validateCredentials(account)`.
@@ -131,7 +142,20 @@ Every publishing channel inherits from `BaseAdapter`
   - Meta (`facebook`, `instagram`)
   - Twitter / X (`twitter`)
   - LinkedIn (`linkedin`)
-  - Google Business Profile (`gbp`) for Local Posts (#13) with CTA buttons and offers.
+  - Google Business Profile (`gbp`) for Local Posts (#13) with `topicType` (`STANDARD` | `EVENT` | `OFFER`),
+    `callToAction` buttons, offers, events, and photo support.
+
+### LLM provider adapters
+All AI/LLM calls across controllers and services sit behind `BaseLlmAdapter`
+([`backend/src/services/llm/BaseLlmAdapter.js`](../backend/src/services/llm/BaseLlmAdapter.js)):
+- **Consistent interface**: `generateCaption(params)`, `suggestHashtags(params)`,
+  `repurposeContent(params)`, `generateVariants(params)`, `evaluateTone(params)`,
+  `checkSensitivity(params)`, and `healthCheck()`.
+- **Swappable & mockable**: Registered in `llmAdapterRegistry`
+  ([`backend/src/services/llm/llmAdapterRegistry.js`](../backend/src/services/llm/llmAdapterRegistry.js)),
+  with [`AiServiceLlmAdapter`](../backend/src/services/llm/AiServiceLlmAdapter.js) registered as the
+  default provider (`ai-service`). Controllers, `contentAdaptation.service.js`, and F09 guardrail
+  evaluators resolve `getLlmAdapter(...)`, allowing providers to be swapped or mocked cleanly in tests.
 
 ## AI microservice boundary
 
@@ -140,14 +164,14 @@ The AI service is deliberately isolated from the core backend:
   compatible SDK against Groq) better than Node.
 - It's a stateless request/response service — no data store, no shared
   state with the backend.
-- The Express backend proxies all AI calls (`/api/v1/ai/*`) rather than the
-  frontend calling the AI service directly, keeping JWT auth and rate
-  limiting in one place.
+- The Express backend proxies all AI calls (`/api/v1/ai/*`) via `AiServiceLlmAdapter` rather than
+  the frontend calling the AI service directly, keeping JWT auth, rate limiting, and provider
+  swapping in one place.
 - Two independent fallback layers exist so the demo never hard-fails: the
   AI service itself falls back to a template generator if no
-  `GROQ_API_KEY`/`OPENAI_API_KEY` is set, and the backend's `ai.controller.js`
-  falls back to its own built-in generator if the AI service is unreachable
-  at all.
+  `GROQ_API_KEY`/`OPENAI_API_KEY` is set, and the backend's `ai.controller.js` /
+  `contentAdaptation.service.js` fall back to built-in generators if the active LLM
+  adapter returns `null` or is unreachable.
 
 ## Media uploads
 

@@ -7,6 +7,8 @@ const postMetricsModel = require("../models/postMetrics.model");
 const businessProfileModel = require("../models/businessProfile.model");
 const contentAdaptationService = require("../services/contentAdaptation.service");
 const { enqueuePublishJob } = require("../queue");
+const { resolveAccountCredentials } = require("../queue/publishProcessor");
+const { getAdapter } = require("../services/publishers/adapterRegistry");
 const guardrailsService = require("../services/guardrails/guardrailsService");
 const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
 
@@ -258,6 +260,7 @@ async function approve(req, res) {
         content: post.content?.body || "",
         mediaUrls: post.content?.mediaUrls || [],
         hashtags: post.content?.hashtags || [],
+        options: post.aiMetadata?.gbpOptions || post.aiMetadata?.options || {},
       },
       { delay }
     );
@@ -287,6 +290,12 @@ async function requestChanges(req, res) {
 // Statuses a post can't be published from again.
 const ALREADY_PUBLISHING = ["scheduled", "publishing", "published"];
 
+const publishSinglePostSchema = z.object({
+  scheduledAt: z.string().datetime().optional().nullable(),
+  socialAccountId: z.string().optional().nullable(),
+  options: z.record(z.any()).optional(),
+});
+
 async function publishNow(req, res) {
   const post = await postModel.findById(req.params.id);
   if (!post || post.workspaceId !== req.workspaceId) {
@@ -297,10 +306,18 @@ async function publishNow(req, res) {
     return res.status(409).json({ error: `This post is already ${post.status}` });
   }
 
-  if (post.socialAccountId) {
+  const parsed = publishSinglePostSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+
+  const { scheduledAt, socialAccountId, options = {} } = parsed.data;
+  const effectiveAccountId = socialAccountId !== undefined ? socialAccountId : post.socialAccountId || null;
+
+  if (effectiveAccountId) {
     try {
       await validateAccountWorkspaceOwnership({
-        socialAccountId: post.socialAccountId,
+        socialAccountId: effectiveAccountId,
         workspaceId: req.workspaceId,
         userId: req.user.id,
       });
@@ -320,27 +337,43 @@ async function publishNow(req, res) {
     });
   }
 
-  await postModel.updateById(post.id, { status: "scheduled" });
+  const effectiveScheduledAt = scheduledAt !== undefined ? scheduledAt : post.scheduledAt;
+  const scheduledDate = effectiveScheduledAt ? new Date(effectiveScheduledAt) : null;
+  const delay = scheduledDate ? Math.max(0, scheduledDate.getTime() - Date.now()) : 0;
+  const nextStatus = delay > 0 ? "scheduled" : "publishing";
+
+  const dbUpdates = {
+    status: nextStatus,
+    ...(socialAccountId !== undefined ? { socialAccountId: effectiveAccountId } : {}),
+    ...(scheduledAt !== undefined ? { scheduledAt: scheduledDate } : {}),
+  };
+  await postModel.updateById(post.id, dbUpdates);
 
   await enqueuePublishJob(
     {
       postId: post.id,
       platform: post.channel,
       contentDraftId: post.id,
-      socialAccountId: post.socialAccountId || null,
+      socialAccountId: effectiveAccountId,
       workspaceId: req.workspaceId,
       content: post.content?.body || "",
       mediaUrls: post.content?.mediaUrls || [],
       hashtags: post.content?.hashtags || [],
+      options: {
+        ...(post.aiMetadata?.gbpOptions || post.aiMetadata?.options || {}),
+        ...options,
+      },
     },
-    { delay: 0 }
+    { delay }
   );
 
   return res.status(202).json({
     postId: post.id,
-    status: "publishing",
+    status: nextStatus,
     platform: post.channel,
     title: post.content?.title,
+    scheduledAt: scheduledDate,
+    delay,
   });
 }
 
@@ -405,6 +438,7 @@ async function publishApproved(req, res) {
         content: post.content?.body || "",
         mediaUrls: post.content?.mediaUrls || [],
         hashtags: post.content?.hashtags || [],
+        options: post.aiMetadata?.gbpOptions || post.aiMetadata?.options || {},
       },
       { delay }
     );
@@ -444,6 +478,68 @@ async function getTopPerforming(req, res) {
     metric,
   });
   return res.json(result);
+}
+
+async function getPostMetrics(req, res) {
+  const post = await postModel.findById(req.params.id);
+  if (!post || post.workspaceId !== req.workspaceId) {
+    return res.status(404).json({ error: "Post not found" });
+  }
+
+  const [latestMetrics, history] = await Promise.all([
+    postMetricsModel.getLatestByPostId(post.id),
+    postMetricsModel.findByPostId(post.id),
+  ]);
+
+  return res.json({
+    postId: post.id,
+    channel: post.channel,
+    status: post.status,
+    externalPostId: post.externalPostId || null,
+    latestMetrics,
+    history,
+  });
+}
+
+async function refreshPostMetrics(req, res) {
+  const post = await postModel.findById(req.params.id);
+  if (!post || post.workspaceId !== req.workspaceId) {
+    return res.status(404).json({ error: "Post not found" });
+  }
+
+  if (post.status !== "published") {
+    return res.status(400).json({ error: "Metrics can only be refreshed for published posts" });
+  }
+
+  const account = await resolveAccountCredentials({
+    socialAccountId: post.socialAccountId || null,
+    workspaceId: req.workspaceId,
+    platform: post.channel,
+  });
+
+  const adapter = getAdapter(post.channel);
+  const collected = await adapter.getMetrics({
+    externalPostId: post.externalPostId,
+    postId: post.id,
+    account,
+    platform: post.channel,
+  });
+
+  const snapshot = await postMetricsModel.create({
+    postId: post.id,
+    reach: collected?.reach || 0,
+    likes: collected?.likes || 0,
+    comments: collected?.comments || 0,
+    shares: collected?.shares || 0,
+    clicks: collected?.clicks || 0,
+    captureTime: new Date(),
+  });
+
+  return res.json({
+    postId: post.id,
+    latestMetrics: snapshot,
+    snapshot,
+  });
 }
 
 const generateVariantsSchema = z.object({
@@ -553,7 +649,7 @@ async function generateVariants(req, res) {
 
 const repurposePostSchema = z.object({
   targetChannels: z
-    .array(z.enum(["twitter", "linkedin", "instagram", "facebook"]))
+    .array(z.enum(ALLOWED_CHANNELS))
     .min(1, "At least one target channel is required"),
   tone: z.string().optional(),
   saveAsDrafts: z.boolean().optional(),
@@ -651,7 +747,7 @@ const batchCreateSchema = z.object({
           .string()
           .min(1, "Post body is required")
           .max(MAX_IDEA_LENGTH, `Post body cannot exceed ${MAX_IDEA_LENGTH} characters`),
-        channel: z.enum(["twitter", "linkedin", "instagram", "facebook"]),
+        channel: z.enum(ALLOWED_CHANNELS),
         campaignId: z.string().optional().nullable(),
         mediaUrls: z.array(z.string()).optional(),
         hashtags: z.array(z.string()).optional(),
@@ -721,6 +817,8 @@ module.exports = {
   publishNow,
   deletePost,
   getTopPerforming,
+  getPostMetrics,
+  refreshPostMetrics,
   generateVariants,
   repurposePost,
   batchCreate,

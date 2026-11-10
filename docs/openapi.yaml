@@ -3,8 +3,10 @@ info:
   title: Social Media Content Publishing System API
   version: 0.1.0
   description: >
-    Core backend API (Express) for authentication, content management,
-    AI generation proxying, and publishing to Facebook/Instagram.
+    Core backend API (Express) for authentication, workspace & role management,
+    content drafts, swappable LLM AI generation/adaptation, and queued
+    omnichannel publishing with metrics across Facebook, Instagram, Twitter/X,
+    LinkedIn, and Google Business Profile (GBP Local Posts #13).
 servers:
   - url: http://localhost:4000/api/v1
     description: Local development
@@ -96,7 +98,7 @@ paths:
                 body: { type: string }
                 platforms:
                   type: array
-                  items: { type: string, enum: [facebook, instagram] }
+                  items: { type: string, enum: [facebook, instagram, twitter, linkedin, gbp, google_business] }
       responses:
         "201": { description: Draft created }
 
@@ -266,6 +268,58 @@ paths:
       responses:
         "201": { description: Created posts }
 
+  /posts/{id}/publish-now:
+    post:
+      tags: [Posts]
+      summary: Publish or schedule a single post immediately or at a future time
+      description: >
+        Owner only. Validates workspace ownership of the target social account
+        before queuing. Automatically records approval if the post was not yet
+        approved.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scheduledAt: { type: string, format: date-time, nullable: true }
+                socialAccountId: { type: string, nullable: true }
+                options:
+                  type: object
+                  description: Platform-specific options (e.g., GBP Local Post topicType, callToAction)
+      responses:
+        "202": { description: Post queued for publishing or scheduled }
+        "403": { description: Social account does not belong to the requester's workspace, or non-owner }
+        "404": { description: Post not found }
+        "409": { description: Post is already scheduled, publishing, or published }
+
+  /posts/{id}/metrics:
+    get:
+      tags: [Posts]
+      summary: Get collected engagement metrics history and latest snapshot for a post
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200": { description: Latest metrics snapshot and full capture history }
+        "404": { description: Post not found }
+
+  /posts/{id}/metrics/refresh:
+    post:
+      tags: [Posts]
+      summary: Trigger immediate metrics collection from the channel adapter for a published post
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/idParam"
+      responses:
+        "200": { description: Fresh metrics snapshot captured and stored }
+        "400": { description: Post is not in published status }
+        "404": { description: Post not found }
+
   /posts/publish-approved:
     post:
       tags: [Posts]
@@ -292,7 +346,7 @@ paths:
   /publish/now:
     post:
       tags: [Publish]
-      summary: Publish a draft immediately to one or multiple connected channels
+      summary: Publish or schedule a draft across one or multiple connected channels simultaneously
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -305,10 +359,14 @@ paths:
                 contentDraftId: { type: string }
                 platform: { type: string }
                 platforms: { type: array, items: { type: string } }
-                socialAccountId: { type: string }
+                socialAccountId: { type: string, nullable: true }
                 socialAccountIds: { type: array, items: { type: string } }
+                scheduledAt: { type: string, format: date-time, nullable: true }
+                options:
+                  type: object
+                  description: Platform-specific publish options (e.g., GBP Local Posts #13 topicType & callToAction)
       responses:
-        "202": { description: Publish job accepted }
+        "202": { description: Publish job(s) accepted }
         "403": { description: Social account does not belong to the requester's workspace }
         "404": { description: Content draft or social account not found }
 
