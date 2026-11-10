@@ -73,6 +73,23 @@ export function BusinessProfileModal() {
   const [quietStart, setQuietStart] = useState("22:00");
   const [quietEnd, setQuietEnd] = useState("08:00");
 
+  // Guardrail Settings (F09)
+  const [bannedClaimsInput, setBannedClaimsInput] = useState("");
+  const [bannedKeywordsInput, setBannedKeywordsInput] = useState("");
+  const [requiredDisclosuresInput, setRequiredDisclosuresInput] = useState("");
+  const [toneStrictness, setToneStrictness] = useState("moderate");
+  const [sensitivityLevel, setSensitivityLevel] = useState("standard");
+
+  // Interactive Live Tester state
+  const [testDraftText, setTestDraftText] = useState("");
+  const [draftTestResult, setDraftTestResult] = useState(null);
+  const [testingDraft, setTestingDraft] = useState(false);
+
+  const [testTrendTopic, setTestTrendTopic] = useState("");
+  const [testTrendSnippet, setTestTrendSnippet] = useState("");
+  const [trendTestResult, setTrendTestResult] = useState(null);
+  const [testingTrend, setTestingTrend] = useState(false);
+
   useEffect(() => {
     if (!isBusinessProfileOpen || !currentWorkspace) return;
 
@@ -100,6 +117,13 @@ export function BusinessProfileModal() {
           setSelectedTones(tones.length > 0 ? tones : ["professional"]);
           setSelectedGoals(goals.length > 0 ? goals : ["brand_awareness"]);
           setActiveChannels(knownKeys(prof.activeChannels, CHANNELS));
+          if (prof.guardrails) {
+            setBannedClaimsInput((prof.guardrails.bannedClaims || []).join(", "));
+            setBannedKeywordsInput((prof.guardrails.bannedKeywords || []).join(", "));
+            setRequiredDisclosuresInput((prof.guardrails.requiredDisclosures || []).join(", "));
+            setToneStrictness(prof.guardrails.toneStrictness || "moderate");
+            setSensitivityLevel(prof.guardrails.sensitivityLevel || "standard");
+          }
         }
         if (notif) {
           setDailyCap(notif.dailyCap || 5);
@@ -119,6 +143,41 @@ export function BusinessProfileModal() {
 
   if (!isBusinessProfileOpen) return null;
 
+  async function handleRunDraftTest(textToTest) {
+    const text = textToTest !== undefined ? textToTest : testDraftText;
+    if (!text.trim()) return addToast("info", "Please enter text to test");
+    setTestingDraft(true);
+    try {
+      const res = await api.guardrails.checkDraft({ content: text });
+      setDraftTestResult(res);
+      addToast("success", `Guardrails evaluated: Score ${res.score}/100`);
+    } catch (err) {
+      addToast("error", err.message || "Guardrail check failed");
+    } finally {
+      setTestingDraft(false);
+    }
+  }
+
+  async function handleRunTrendTest(topicToTest, snippetToTest) {
+    const topic = topicToTest !== undefined ? topicToTest : testTrendTopic;
+    const snippet = snippetToTest !== undefined ? snippetToTest : testTrendSnippet;
+    if (!topic.trim()) return addToast("info", "Please enter a trend topic to screen");
+    setTestingTrend(true);
+    try {
+      const res = await api.guardrails.checkTrend({ topic, snippet });
+      setTrendTestResult(res);
+      if (res.isSensitive) {
+        addToast("info", "Sensitivity Filter: Topic BLOCKED as high-risk/sensitive.");
+      } else {
+        addToast("success", "Sensitivity Filter: Topic PASSED (safe for drafting).");
+      }
+    } catch (err) {
+      addToast("error", err.message || "Trend screening failed");
+    } finally {
+      setTestingTrend(false);
+    }
+  }
+
   async function handleSave(e) {
     if (e) e.preventDefault();
 
@@ -134,6 +193,13 @@ export function BusinessProfileModal() {
         tone: selectedTones,
         goals: selectedGoals,
         activeChannels,
+        guardrails: {
+          bannedClaims: bannedClaimsInput.split(",").map((s) => s.trim()).filter(Boolean),
+          bannedKeywords: bannedKeywordsInput.split(",").map((s) => s.trim()).filter(Boolean),
+          requiredDisclosures: requiredDisclosuresInput.split(",").map((s) => s.trim()).filter(Boolean),
+          toneStrictness,
+          sensitivityLevel,
+        },
       });
 
       await api.businessProfile.updateNotifications({
@@ -220,6 +286,17 @@ export function BusinessProfileModal() {
             }`}
           >
             Notification Budget
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("guardrails")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              activeTab === "guardrails"
+                ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            Brand Guardrails (F09)
           </button>
         </div>
 
@@ -372,6 +449,319 @@ export function BusinessProfileModal() {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === "guardrails" && (
+              <div className="space-y-6">
+                {/* Section 1: Brand Guardrail Settings */}
+                <div className="space-y-4">
+                  <div className="border-b border-slate-800 pb-2">
+                    <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                      Workspace Guardrail Rules
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Configure automated checks for tone alignment, prohibited claims, and mandatory disclosures.
+                    </p>
+                  </div>
+
+                  <Field
+                    label="Banned Claims / Prohibited Phrases"
+                    hint="Separate claims with commas. E.g.: cheapest in town, miracle cure, 100% guaranteed"
+                  >
+                    <input
+                      type="text"
+                      placeholder="e.g. miracle cure, cheapest in town, instant riches"
+                      value={bannedClaimsInput}
+                      onChange={(e) => setBannedClaimsInput(e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Banned Keywords (Competitors / Restricted Terms)"
+                    hint="Separate keywords with commas. E.g.: CompetitorX, RivalBrand"
+                  >
+                    <input
+                      type="text"
+                      placeholder="e.g. CompetitorX, RivalApp"
+                      value={bannedKeywordsInput}
+                      onChange={(e) => setBannedKeywordsInput(e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Mandatory Required Disclosures"
+                    hint="Disclosures enforced for promotional posts. Separate with commas. E.g.: #ad, #sponsored, Results may vary"
+                  >
+                    <input
+                      type="text"
+                      placeholder="e.g. #ad, #sponsored, Past performance does not guarantee future results"
+                      value={requiredDisclosuresInput}
+                      onChange={(e) => setRequiredDisclosuresInput(e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Tone Strictness</label>
+                      <select
+                        value={toneStrictness}
+                        onChange={(e) => setToneStrictness(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                      >
+                        <option value="moderate">Moderate (Balanced evaluation)</option>
+                        <option value="strict">Strict (High brand fidelity)</option>
+                        <option value="relaxed">Relaxed (Flexible styling)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Trend Sensitivity Screening</label>
+                      <select
+                        value={sensitivityLevel}
+                        onChange={(e) => setSensitivityLevel(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                      >
+                        <option value="standard">Standard (Disasters, tragedies, crises)</option>
+                        <option value="conservative">Conservative (Extra precautionary)</option>
+                        <option value="relaxed">Relaxed (Severe crises only)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: Interactive Live Tester */}
+                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-400">🛡️</span>
+                        <h4 className="text-xs font-bold text-white uppercase tracking-wider">Live Guardrail Tester</h4>
+                      </div>
+                      <p className="text-[11px] text-slate-400">Test draft copy or trend headlines live against active workspace rules.</p>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
+                      Human in Loop: Mandatory
+                    </span>
+                  </div>
+
+                  {/* Draft Check Sub-tool */}
+                  <div className="space-y-2">
+                    <label className="block text-[11px] font-semibold text-slate-300">1. Test Draft Post Copy</label>
+                    <div className="flex flex-wrap gap-1.5 mb-1">
+                      <span className="text-[10px] text-slate-400 self-center">Presets:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sample = "Try our miracle cure for guaranteed 100% return! Use code SAVE20.";
+                          setTestDraftText(sample);
+                          handleRunDraftTest(sample);
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 transition"
+                      >
+                        🚨 Miracle Cure & Missing #ad
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sample = "Excited to partner on scalable AI workflows for high-growth teams. #ad";
+                          setTestDraftText(sample);
+                          handleRunDraftTest(sample);
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 transition"
+                      >
+                        ✅ Clean Copy with #ad
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sample = "Shut up you idiots and buy this product immediately!";
+                          setTestDraftText(sample);
+                          handleRunDraftTest(sample);
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 transition"
+                      >
+                        ⚠️ Hostile Tone
+                      </button>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <textarea
+                        rows={2}
+                        value={testDraftText}
+                        onChange={(e) => setTestDraftText(e.target.value)}
+                        placeholder="Type post copy to audit tone, banned claims, and required disclosures..."
+                        className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white"
+                      />
+                      <button
+                        type="button"
+                        disabled={testingDraft}
+                        onClick={() => handleRunDraftTest()}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold self-end disabled:opacity-50 transition"
+                      >
+                        {testingDraft ? "Auditing..." : "Audit Copy"}
+                      </button>
+                    </div>
+
+                    {draftTestResult && (
+                      <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs space-y-2 mt-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-300">Audit Result:</span>
+                          <span
+                            className={`px-2 py-0.5 rounded font-bold text-[11px] ${
+                              draftTestResult.passed
+                                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                                : "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                            }`}
+                          >
+                            Score: {draftTestResult.score}/100 — {draftTestResult.passed ? "PASSED" : "VIOLATIONS DETECTED"}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                          <div>
+                            <span className="text-slate-400">Tone Match:</span>{" "}
+                            <span className={draftTestResult.tone?.passed ? "text-emerald-400" : "text-amber-400"}>
+                              {draftTestResult.tone?.passed ? "✓ Matches" : "✗ Diverges"} ({draftTestResult.tone?.detectedTone || "neutral"})
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">Banned Claims:</span>{" "}
+                            <span className={draftTestResult.bannedClaims?.passed ? "text-emerald-400" : "text-rose-400"}>
+                              {draftTestResult.bannedClaims?.passed ? "✓ Clear" : `✗ Flagged (${draftTestResult.bannedClaims?.violations?.length})`}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">Disclosures:</span>{" "}
+                            <span className={draftTestResult.disclosures?.passed ? "text-emerald-400" : "text-amber-400"}>
+                              {draftTestResult.disclosures?.passed ? "✓ Clear" : `✗ Missing (${draftTestResult.disclosures?.missing?.length})`}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">Human Approval:</span>{" "}
+                            <span className="text-indigo-400 font-semibold">Strictly Mandatory</span>
+                          </div>
+                        </div>
+
+                        {draftTestResult.violations?.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-slate-800 space-y-1">
+                            {draftTestResult.violations.map((v, i) => (
+                              <div key={i} className="text-[11px] text-rose-300 flex items-start gap-1.5">
+                                <span>•</span>
+                                <span>{v.message || v.reason || v.phrase || "Policy violation"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Trend Sensitivity Screening Sub-tool */}
+                  <div className="space-y-2 pt-3 border-t border-slate-800">
+                    <label className="block text-[11px] font-semibold text-slate-300">
+                      2. Pre-Draft Trend Sensitivity Filter (#24 Assistant)
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 mb-1">
+                      <span className="text-[10px] text-slate-400 self-center">Presets:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const topic = "Deadly 7.8 magnitude earthquake strikes eastern province";
+                          const snip = "Emergency teams search collapsed buildings as death toll rises past 400.";
+                          setTestTrendTopic(topic);
+                          setTestTrendSnippet(snip);
+                          handleRunTrendTest(topic, snip);
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 transition"
+                      >
+                        🌪️ Deadly Earthquake
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const topic = "Commercial flight crashes in mountainous terrain with zero survivors";
+                          const snip = "Search and rescue locates wreckage after fatal crash.";
+                          setTestTrendTopic(topic);
+                          setTestTrendSnippet(snip);
+                          handleRunTrendTest(topic, snip);
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 transition"
+                      >
+                        ✈️ Plane Crash Disaster
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const topic = "This new productivity app is completely killing it on ProductHunt";
+                          const snip = "Founders share their journey to 10k daily users.";
+                          setTestTrendTopic(topic);
+                          setTestTrendSnippet(snip);
+                          handleRunTrendTest(topic, snip);
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 transition"
+                      >
+                        🚀 Safe: App &quot;Killing It&quot;
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={testTrendTopic}
+                        onChange={(e) => setTestTrendTopic(e.target.value)}
+                        placeholder="Trend headline / topic..."
+                        className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={testTrendSnippet}
+                          onChange={(e) => setTestTrendSnippet(e.target.value)}
+                          placeholder="Snippet / news context..."
+                          className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white"
+                        />
+                        <button
+                          type="button"
+                          disabled={testingTrend}
+                          onClick={() => handleRunTrendTest()}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold disabled:opacity-50 transition"
+                        >
+                          {testingTrend ? "Screening..." : "Screen Trend"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {trendTestResult && (
+                      <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs space-y-1.5 mt-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-300">Screening Result:</span>
+                          <span
+                            className={`px-2 py-0.5 rounded font-bold text-[11px] ${
+                              trendTestResult.isSensitive
+                                ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                            }`}
+                          >
+                            {trendTestResult.isSensitive ? "BLOCKED: SENSITIVE / TRAGEDY" : "PASSED: SAFE FOR DRAFTING"}
+                          </span>
+                        </div>
+                        {trendTestResult.isSensitive ? (
+                          <div className="text-[11px] text-rose-300">
+                            <strong>Reason:</strong> {trendTestResult.reason} (Category: {trendTestResult.category})
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-emerald-400">
+                            ✓ No sensitive tragedy or controversy detected. Pre-draft check cleared.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

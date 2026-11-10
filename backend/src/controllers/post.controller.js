@@ -7,6 +7,7 @@ const postMetricsModel = require("../models/postMetrics.model");
 const businessProfileModel = require("../models/businessProfile.model");
 const contentAdaptationService = require("../services/contentAdaptation.service");
 const { enqueuePublishJob } = require("../queue");
+const guardrailsService = require("../services/guardrails/guardrailsService");
 const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
 
 const ALLOWED_CHANNELS = ["twitter", "linkedin", "instagram", "facebook", "gbp", "google_business"];
@@ -62,6 +63,14 @@ async function create(req, res) {
     }
   }
 
+  const guardrails = await guardrailsService.auditDraft({
+    content: body,
+    channel,
+    mediaUrls,
+    hashtags,
+    workspaceId: req.workspaceId,
+  });
+
   const post = await postModel.create({
     workspaceId: req.workspaceId,
     authorId: req.user.id,
@@ -72,7 +81,10 @@ async function create(req, res) {
     status: "draft",
     scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
     origin,
-    aiMetadata,
+    aiMetadata: {
+      ...aiMetadata,
+      guardrails,
+    },
     versions: [{ body, editedAt: new Date(), editedBy: req.user.id }],
   });
 
@@ -145,6 +157,22 @@ async function update(req, res) {
     }
   }
 
+  if (updates.content || updates.channel) {
+    const updatedContent = updates.content || post.content || {};
+    const updatedChannel = updates.channel || post.channel || "instagram";
+    const guardrails = await guardrailsService.auditDraft({
+      content: updatedContent.body || "",
+      channel: updatedChannel,
+      mediaUrls: updatedContent.mediaUrls || [],
+      hashtags: updatedContent.hashtags || [],
+      workspaceId: req.workspaceId,
+    });
+    updates.aiMetadata = {
+      ...(post.aiMetadata || {}),
+      guardrails,
+    };
+  }
+
   const updated = await postModel.updateById(post.id, updates);
   return res.json(updated);
 }
@@ -155,7 +183,24 @@ async function submitApproval(req, res) {
     return res.status(404).json({ error: "Post not found" });
   }
 
-  const updated = await postModel.updateById(post.id, { status: "pending_approval" });
+  let guardrails = post.aiMetadata?.guardrails;
+  if (!guardrails) {
+    guardrails = await guardrailsService.auditDraft({
+      content: post.content?.body || "",
+      channel: post.channel || "instagram",
+      mediaUrls: post.content?.mediaUrls || [],
+      hashtags: post.content?.hashtags || [],
+      workspaceId: req.workspaceId,
+    });
+  }
+
+  const updated = await postModel.updateById(post.id, {
+    status: "pending_approval",
+    aiMetadata: {
+      ...(post.aiMetadata || {}),
+      guardrails,
+    },
+  });
 
   await approvalEventModel.create({
     postId: post.id,
@@ -164,7 +209,13 @@ async function submitApproval(req, res) {
     comment: req.body.comment || "",
   });
 
-  return res.json(updated);
+  return res.json({
+    ...updated,
+    guardrailsWarning:
+      guardrails && !guardrails.passed
+        ? `Post has ${guardrails.violations?.length || 1} brand guardrail violation(s) requiring approver review.`
+        : null,
+  });
 }
 
 async function approve(req, res) {
@@ -617,25 +668,43 @@ async function batchCreate(req, res) {
     return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
   }
 
-  const itemsToInsert = parsed.data.posts.map((item) => ({
-    workspaceId: req.workspaceId,
-    ownerId: req.user.id,
-    channel: item.channel,
-    platforms: [item.channel],
-    title: item.title || `Post for ${item.channel}`,
-    body: item.body,
-    mediaUrls: item.mediaUrls || [],
-    hashtags: item.hashtags || [],
-    status: "draft",
-    aiMetadata: item.aiMetadata || {},
-    versions: [
-      {
+  const profile = req.workspaceId ? await businessProfileModel.findByWorkspaceId(req.workspaceId) : null;
+
+  const itemsToInsert = await Promise.all(
+    parsed.data.posts.map(async (item) => {
+      const guardrails = await guardrailsService.auditDraft({
+        content: item.body,
+        channel: item.channel,
+        mediaUrls: item.mediaUrls || [],
+        hashtags: item.hashtags || [],
+        workspaceId: req.workspaceId,
+        profile,
+      });
+
+      return {
+        workspaceId: req.workspaceId,
+        ownerId: req.user.id,
+        channel: item.channel,
+        platforms: [item.channel],
+        title: item.title || `Post for ${item.channel}`,
         body: item.body,
-        editedAt: new Date(),
-        editedBy: req.user.id,
-      },
-    ],
-  }));
+        mediaUrls: item.mediaUrls || [],
+        hashtags: item.hashtags || [],
+        status: "draft",
+        aiMetadata: {
+          ...(item.aiMetadata || {}),
+          guardrails,
+        },
+        versions: [
+          {
+            body: item.body,
+            editedAt: new Date(),
+            editedBy: req.user.id,
+          },
+        ],
+      };
+    })
+  );
 
   const createdDrafts = await contentDraftModel.createMany(itemsToInsert);
   return res.status(201).json({ items: createdDrafts });

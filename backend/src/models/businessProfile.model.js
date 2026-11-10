@@ -18,6 +18,13 @@ const businessProfileSchema = new mongoose.Schema(
     tone: { type: [String], default: [] },
     goals: { type: [String], default: [] },
     activeChannels: { type: [String], default: [] },
+    guardrails: {
+      bannedClaims: { type: [String], default: [] },
+      requiredDisclosures: { type: [String], default: [] },
+      toneStrictness: { type: String, enum: ["strict", "moderate", "relaxed"], default: "moderate" },
+      bannedKeywords: { type: [String], default: [] },
+      sensitivityLevel: { type: String, enum: ["conservative", "standard", "relaxed"], default: "standard" },
+    },
     // Set when the onboarding wizard is finished (#04). Null means the
     // workspace still needs onboarding; see isOnboardingComplete.
     onboardingCompletedAt: { type: Date, default: null },
@@ -37,9 +44,20 @@ async function find(query = {}) {
 }
 
 async function upsert(workspaceId, profileData) {
+  const { guardrails, ...rest } = profileData || {};
+  const setPayload = { ...rest };
+
+  if (guardrails && typeof guardrails === "object") {
+    for (const [key, value] of Object.entries(guardrails)) {
+      if (value !== undefined) {
+        setPayload[`guardrails.${key}`] = value;
+      }
+    }
+  }
+
   const updated = await BusinessProfile.findOneAndUpdate(
     { workspaceId },
-    { $set: profileData },
+    { $set: setPayload },
     { new: true, upsert: true, setDefaultsOnInsert: true }
   ).lean();
   return withId(updated);
