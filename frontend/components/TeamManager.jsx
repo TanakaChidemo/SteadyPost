@@ -12,10 +12,12 @@ const errorText = (err, fallback) => err?.response?.data?.error || fallback;
 
 /** The people on the current business, and (for the owner) invite links. */
 export function TeamManager() {
-  const { authReady, user, currentWorkspace, fetchWorkspaces, addToast } = useAppStore();
+  const { authReady, user, currentWorkspace, workspaces, fetchWorkspaces, addToast } = useAppStore();
   const [team, setTeam] = useState(null);
   const workspaceId = currentWorkspace?.id || currentWorkspace?._id;
   const manages = can(currentWorkspace, "members.manage");
+  const businessName = currentWorkspace?.name || "this business";
+  const ownsSeveral = workspaces.filter((ws) => ws.role === "owner").length > 1;
 
   const load = useCallback(() => {
     if (!workspaceId) return;
@@ -38,8 +40,14 @@ export function TeamManager() {
   return (
     <div className="max-w-2xl space-y-6">
       <div className="pb-4 border-b border-slate-800">
-        <h1 className="text-2xl font-bold text-white tracking-tight">Team</h1>
-        <p className="text-xs text-slate-400 mt-0.5">{currentWorkspace?.name}</p>
+        <h1 className="text-2xl font-bold text-white tracking-tight">
+          Team <span className="text-slate-500">·</span> {businessName}
+        </h1>
+        {ownsSeveral && (
+          <p className="text-xs text-slate-400 mt-0.5">
+            Showing the team for {businessName}. Switch business from the profile menu to manage another team.
+          </p>
+        )}
       </div>
 
       {!team ? (
@@ -52,7 +60,7 @@ export function TeamManager() {
             ))}
           </ul>
 
-          {manages && <InviteBox invitations={team.invitations} onChanged={load} />}
+          {manages && <InviteBox businessName={businessName} invitations={team.invitations} onChanged={load} />}
 
           {currentWorkspace?.role !== "owner" && (
             <LeaveTeam
@@ -136,7 +144,7 @@ function MemberRow({ member, manages, onChanged }) {
   );
 }
 
-function InviteBox({ invitations, onChanged }) {
+function InviteBox({ businessName, invitations, onChanged }) {
   const addToast = useAppStore((s) => s.addToast);
   const [role, setRole] = useState("editor");
   const [label, setLabel] = useState("");
@@ -178,7 +186,7 @@ function InviteBox({ invitations, onChanged }) {
 
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-semibold text-white">Invite someone</h2>
+      <h2 className="text-sm font-semibold text-white">Invite someone to {businessName}</h2>
       <form onSubmit={create} className="flex flex-wrap gap-2">
         <select
           value={role}
@@ -217,6 +225,9 @@ function InviteBox({ invitations, onChanged }) {
               Copy
             </button>
           </div>
+          <p className="text-[11px] text-slate-400">
+            This link adds one person to {businessName} only. Your other businesses aren&apos;t shared.
+          </p>
           <p className="text-[11px] text-slate-400">
             Send it however you like. It works once, for 7 days, and you won&apos;t see it again after leaving this page.
           </p>
