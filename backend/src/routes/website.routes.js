@@ -3,7 +3,7 @@ const rateLimit = require("express-rate-limit");
 const websiteController = require("../controllers/website.controller");
 const { requireAuth } = require("../middleware/auth");
 const { resolveWorkspace } = require("../middleware/workspaceContext");
-const { requireWorkspaceRole } = require("../middleware/requireWorkspaceRole");
+const { requirePermission } = require("../middleware/requirePermission");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -23,7 +23,7 @@ router.get("/connection", resolveWorkspace, websiteController.getConnection);
 router.put(
   "/connection",
   resolveWorkspace,
-  requireWorkspaceRole("owner", "editor"),
+  requirePermission("website.connect"),
   fetchLimiter,
   websiteController.connect
 );

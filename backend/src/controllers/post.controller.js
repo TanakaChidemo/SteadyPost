@@ -8,6 +8,8 @@ const businessProfileModel = require("../models/businessProfile.model");
 const contentAdaptationService = require("../services/contentAdaptation.service");
 const { enqueuePublishJob } = require("../queue");
 const guardrailsService = require("../services/guardrails/guardrailsService");
+const approvalService = require("../services/approval.service");
+const userModel = require("../models/user.model");
 const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
 
 const ALLOWED_CHANNELS = ["twitter", "linkedin", "instagram", "facebook", "gbp", "google_business"];
@@ -91,17 +93,26 @@ async function create(req, res) {
   return res.status(201).json(post);
 }
 
+/** Adds `actorName` to each approval event, for the post's history. */
+async function withActorNames(events) {
+  const ids = [...new Set(events.map((e) => e.actorId))];
+  const users = await userModel.User.find({ _id: { $in: ids } }, { name: 1, email: 1 }).lean();
+  const names = new Map(users.map((u) => [u._id, u.name || u.email]));
+  return events.map((e) => ({ ...e, actorName: names.get(e.actorId) || "Former member" }));
+}
+
 async function getById(req, res) {
   const post = await postModel.findById(req.params.id);
   if (!post || post.workspaceId !== req.workspaceId) {
     return res.status(404).json({ error: "Post not found" });
   }
 
-  const [approvalEvents, predictionRecords, latestMetrics] = await Promise.all([
+  const [events, predictionRecords, latestMetrics] = await Promise.all([
     approvalEventModel.findByPostId(post.id),
     predictionRecordModel.findByPostId(post.id),
     postMetricsModel.getLatestByPostId(post.id),
   ]);
+  const approvalEvents = await withActorNames(events);
 
   return res.json({
     ...post,
@@ -111,10 +122,16 @@ async function getById(req, res) {
   });
 }
 
+// Posts that are on their way out, or already out, can't be edited.
+const LOCKED_FOR_EDITING = ["scheduled", "publishing", "published"];
+
 async function update(req, res) {
   const post = await postModel.findById(req.params.id);
   if (!post || post.workspaceId !== req.workspaceId) {
     return res.status(404).json({ error: "Post not found" });
+  }
+  if (LOCKED_FOR_EDITING.includes(post.status)) {
+    return res.status(409).json({ error: `This post is already ${post.status}, so it can't be edited.` });
   }
 
   const updates = {};
@@ -173,116 +190,47 @@ async function update(req, res) {
     };
   }
 
+  // An editor changing a post that's waiting for, or has, the owner's approval
+  // sends it back to draft: the owner only ever approves what they've seen.
+  const needsReapproval = ["pending_approval", "approved"].includes(post.status);
+  if (needsReapproval && req.membership.role !== "owner" && Object.keys(updates).length > 0) {
+    updates.status = "draft";
+  }
+
   const updated = await postModel.updateById(post.id, updates);
   return res.json(updated);
 }
 
-async function submitApproval(req, res) {
-  const post = await postModel.findById(req.params.id);
-  if (!post || post.workspaceId !== req.workspaceId) {
-    return res.status(404).json({ error: "Post not found" });
-  }
-
-  let guardrails = post.aiMetadata?.guardrails;
-  if (!guardrails) {
-    guardrails = await guardrailsService.auditDraft({
-      content: post.content?.body || "",
-      channel: post.channel || "instagram",
-      mediaUrls: post.content?.mediaUrls || [],
-      hashtags: post.content?.hashtags || [],
-      workspaceId: req.workspaceId,
-    });
-  }
-
-  const updated = await postModel.updateById(post.id, {
-    status: "pending_approval",
-    aiMetadata: {
-      ...(post.aiMetadata || {}),
-      guardrails,
-    },
-  });
-
-  await approvalEventModel.create({
-    postId: post.id,
-    actorId: req.user.id,
-    action: "submit",
-    comment: req.body.comment || "",
-  });
-
-  return res.json({
-    ...updated,
-    guardrailsWarning:
-      guardrails && !guardrails.passed
-        ? `Post has ${guardrails.violations?.length || 1} brand guardrail violation(s) requiring approver review.`
-        : null,
-  });
-}
-
-async function approve(req, res) {
-  const post = await postModel.findById(req.params.id);
-  if (!post || post.workspaceId !== req.workspaceId) {
-    return res.status(404).json({ error: "Post not found" });
-  }
-
-  if (post.socialAccountId) {
+// Approval actions go through the shared workflow (services/approval.service)
+// so the app, approval links and Telegram all follow the same rules.
+function approvalHandler(action) {
+  return async (req, res) => {
     try {
-      await validateAccountWorkspaceOwnership({
-        socialAccountId: post.socialAccountId,
+      const { post, guardrailsWarning } = await approvalService.applyApprovalAction({
         workspaceId: req.workspaceId,
-        userId: req.user.id,
+        postId: req.params.id,
+        actorId: req.user.id,
+        role: req.membership.role,
+        action,
+        comment: req.body?.comment,
       });
+      return res.json(action === "submit" ? { ...post, guardrailsWarning } : post);
     } catch (err) {
-      return res.status(err.status || 403).json({ error: err.message });
+      if (err instanceof approvalService.ApprovalError) {
+        return res.status(err.status).json({ error: err.message, code: err.code });
+      }
+      throw err;
     }
-  }
-
-  const targetStatus = post.scheduledAt ? "scheduled" : "approved";
-  const updated = await postModel.updateById(post.id, { status: targetStatus });
-
-  await approvalEventModel.create({
-    postId: post.id,
-    actorId: req.user.id,
-    action: "approve",
-    comment: req.body.comment || "",
-  });
-
-  if (post.scheduledAt) {
-    const delay = Math.max(0, new Date(post.scheduledAt).getTime() - Date.now());
-    await enqueuePublishJob(
-      {
-        postId: post.id,
-        platform: post.channel,
-        contentDraftId: post.id,
-        socialAccountId: post.socialAccountId || null,
-        workspaceId: req.workspaceId,
-        content: post.content?.body || "",
-        mediaUrls: post.content?.mediaUrls || [],
-        hashtags: post.content?.hashtags || [],
-      },
-      { delay }
-    );
-  }
-
-  return res.json(updated);
+  };
 }
 
-async function requestChanges(req, res) {
-  const post = await postModel.findById(req.params.id);
-  if (!post || post.workspaceId !== req.workspaceId) {
-    return res.status(404).json({ error: "Post not found" });
-  }
+const submitApproval = approvalHandler("submit");
+const approve = approvalHandler("approve");
+const requestChanges = approvalHandler("request_changes");
+const reject = approvalHandler("reject");
 
-  const updated = await postModel.updateById(post.id, { status: "changes_requested" });
-
-  await approvalEventModel.create({
-    postId: post.id,
-    actorId: req.user.id,
-    action: "request_changes",
-    comment: req.body.comment || "Changes requested",
-  });
-
-  return res.json(updated);
-}
+// Statuses a post can't be published from again.
+const ALREADY_PUBLISHING = ["scheduled", "publishing", "published"];
 
 async function publishNow(req, res) {
   const post = await postModel.findById(req.params.id);
@@ -290,6 +238,10 @@ async function publishNow(req, res) {
     return res.status(404).json({ error: "Post not found" });
   }
 
+  if (ALREADY_PUBLISHING.includes(post.status)) {
+    return res.status(409).json({ error: `This post is already ${post.status}` });
+  }
+
   if (post.socialAccountId) {
     try {
       await validateAccountWorkspaceOwnership({
@@ -300,6 +252,18 @@ async function publishNow(req, res) {
     } catch (err) {
       return res.status(err.status || 403).json({ error: err.message });
     }
+  }
+
+  // Only owners reach here; publishing a post that wasn't approved counts as
+  // the owner approving it, so the audit trail stays complete.
+  if (post.status !== "approved") {
+    await approvalEventModel.create({
+      workspaceId: req.workspaceId,
+      postId: post.id,
+      actorId: req.user.id,
+      action: "approve",
+      comment: "Published directly by the owner",
+    });
   }
 
   await postModel.updateById(post.id, { status: "scheduled" });
@@ -700,6 +664,7 @@ module.exports = {
   submitApproval,
   approve,
   requestChanges,
+  reject,
   publishNow,
   deletePost,
   getTopPerforming,

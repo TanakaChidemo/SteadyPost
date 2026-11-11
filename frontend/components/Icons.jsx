@@ -188,3 +188,14 @@ export function GearIcon({ className = "w-5 h-5" }) {
     </svg>
   );
 }
+
+export function TeamIcon({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+      <path d="M16 4.5a3.5 3.5 0 0 1 0 7" />
+      <path d="M18.5 20a6.5 6.5 0 0 0-2.5-5.1" />
+    </svg>
+  );
+}
