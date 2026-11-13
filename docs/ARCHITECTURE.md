@@ -3,24 +3,29 @@
 ## System overview
 
 ```
-┌─────────────┐      ┌──────────────────┐      ┌────────────────┐
-│  Next.js 14 │──────▶  Express API GW  │──────▶  Flask AI svc   │
-│  (frontend) │◀──────│  (backend)       │◀──────│  (ai-service)  │
-└─────────────┘      └────────┬─────────┘      └────────┬────────┘
-                               │                          │
-                               ▼                          ▼
-                     ┌──────────────────┐          ┌──────────┐
-                     │ MongoDB          │          │  Groq /  │
-                     │ users, accounts, │          │  OpenAI  │
-                     │ drafts, posts    │          └──────────┘
+┌─────────────┐      ┌──────────────────┐      ┌────────────────────────┐
+│  Next.js 14 │──────▶  Express API GW  │──────▶  LLM Adapter Interface │
+│  (frontend) │◀──────│  (backend)       │◀──────│  (AiServiceLlmAdapter) │
+└─────────────┘      └────────┬─────────┘      └───────────┬────────────┘
+                               │                            ▼
+                               │                   ┌────────────────┐
+                               │                   │ Flask AI svc   │
+                               │                   │ (Groq / OpenAI)│
+                               ▼                   └────────────────┘
+                     ┌──────────────────┐
+                     │ MongoDB + BullMQ │
+                     │ users, accounts, │
+                     │ drafts, posts,   │
+                     │ PostMetrics      │
                      └────────┬─────────┘
-                               │
-                               ▼
-                     ┌──────────────────────┐
-                     │ Meta Graph API        │
-                     │ (Facebook + Instagram)│
-                     │ or sandbox simulator  │
-                     └──────────────────────┘
+                              │
+                              ▼
+                     ┌───────────────────────────────┐
+                     │ Platform Publishing Adapters  │
+                     │ Meta (FB/IG), X, LinkedIn,    │
+                     │ GBP Local Posts (#13),        │
+                     │ or sandbox simulators         │
+                     └───────────────────────────────┘
 ```
 
 ## OAuth login (app identity)
@@ -86,31 +91,71 @@ social accounts, and a sample draft are seeded once at boot
 ([`backend/src/data/seed.js`](../backend/src/data/seed.js)) if they do not
 already exist.
 
-The publish *job* itself is still in-process (`setImmediate` in
-`src/queue/`) — there is no Redis/Bull. Restarting the backend does not
-wipe MongoDB, but it does drop any publish job that was mid-flight.
+The publish job and metrics collection are handled by a unified queue architecture
+([`backend/src/queue/`](../backend/src/queue/)). When Redis is configured (`REDIS_URL` or
+`REDIS_HOST`), BullMQ (`bullmq`) manages distributed scheduling and workers. In local dev
+and test environments without Redis, an in-memory event-driven queue (`InMemoryJobQueue`)
+provides identical semantics with exponential backoff retries, delayed scheduling, and job cancellation.
 
-## Publishing engine flow
+## Publishing engine flow (#10)
 
-1. User hits `/publish/now` with a `contentDraftId`, `platform`, and
-   optional `socialAccountId`.
-2. Backend looks up the draft, inserts a `scheduledposts` row with status
-   `publishing`, and schedules an in-process publish job (`src/queue/`)
-   with zero delay.
-3. The same backend process picks up the job via `setImmediate` and
-   dispatches to the platform-specific publisher
-   (`src/services/publishers/metaPublisher.js`).
-4. `metaPublisher` calls the real Facebook/Instagram Graph API only if
-   `META_APP_ID` is set *and* a `socialAccountId` is provided; otherwise
-   ("sandbox mode") it simulates a successful publish and returns a fake
-   external post ID. Live publishes use the stored Page access token.
-5. The job processor writes the result (`published`/`failed`,
-   `externalPostId`, `errorMessage`) back onto the same `scheduledposts`
-   row, which `/publish/status/:id` reads back.
+1. User/owner triggers publishing via `/posts/publish-approved`, `/posts/:id/publish-now`,
+   or `/publish/now` (supporting immediate publish, future `scheduledAt` delays,
+   2-3+ connected channels simultaneously, and GBP Local Posts #13 `options`).
+2. Workspace ownership check (`validateAccountWorkspaceOwnership` in
+   [`backend/src/utils/workspaceValidation.js`](../backend/src/utils/workspaceValidation.js)):
+   ensures each selected social account belongs to the requester's active workspace before
+   queuing, preventing cross-tenant publishing vulnerabilities. Role-based access enforces
+   that only workspace owners can trigger publication (`requireWorkspaceRole("owner")`), while
+   workspace editors can author drafts/posts and submit them for owner approval.
+3. Post state updates to `scheduled` (when `delay > 0`) or `publishing` (when immediate), and a
+   job is queued via `enqueuePublishJob(...)` with exponential backoff retries (`maxRetries`/`attempts`).
+4. The queue worker (`publishProcessor.js`) executes the job:
+   - Resolves workspace credentials strictly scoped to `workspaceId` (with safe sandbox fallback
+     only when no live token exists).
+   - Looks up the platform adapter from `adapterRegistry` (`MetaAdapter`, `TwitterAdapter`,
+     `LinkedInAdapter`, `GbpAdapter` for GBP Local Posts #13).
+   - Calls the adapter's `publish(...)` method. In live mode with credentials, calls the
+     real platform API; in sandbox mode, safely simulates publishing and returns a mock external ID.
+   - On success: marks post as `published`, sets `publishedAt` and `externalPostId`, and clears
+     any prior `errorMessage`.
+   - On failure: retries with exponential backoff up to `maxRetries` / BullMQ `attempts` (default 3).
+     If all retries exhaust, marks post as `failed` with descriptive `errorMessage`.
+   - On server shutdown, `closeQueues()` cleanly closes BullMQ workers/queues and clears in-memory timers.
+5. Metrics collection:
+   - Immediately following successful publication, the adapter's `getMetrics(...)` is invoked
+     to collect initial engagement metrics (reach, likes, comments, shares, clicks), persisted
+     to `PostMetrics`.
+   - Delayed follow-up metrics jobs are automatically enqueued via `enqueueMetricsJob(...)` to track
+     post performance over time, and workspace members can inspect or trigger fresh snapshots via
+     `GET /api/v1/posts/:id/metrics` and `POST /api/v1/posts/:id/metrics/refresh`.
 
-Because the job delay is zero, this flow is really "publish now" with an
-async-shaped API — there's no scheduled/delayed publishing exposed in the
-UI or API.
+## Platform & LLM adapter architecture
+
+### Platform publishing adapters
+Every publishing channel inherits from `BaseAdapter`
+([`backend/src/services/publishers/BaseAdapter.js`](../backend/src/services/publishers/BaseAdapter.js)):
+- **Consistent interface**: `publish(params)`, `getMetrics(params)`, `validateCredentials(account)`.
+- **Swappable & mockable**: Registered in `adapterRegistry`, enabling unit tests to swap or mock
+  adapters without hitting external APIs or network dependencies.
+- **Unified omnichannel channels**:
+  - Meta (`facebook`, `instagram`)
+  - Twitter / X (`twitter`)
+  - LinkedIn (`linkedin`)
+  - Google Business Profile (`gbp`) for Local Posts (#13) with `topicType` (`STANDARD` | `EVENT` | `OFFER`),
+    `callToAction` buttons, offers, events, and photo support.
+
+### LLM provider adapters
+All AI/LLM calls across controllers and services sit behind `BaseLlmAdapter`
+([`backend/src/services/llm/BaseLlmAdapter.js`](../backend/src/services/llm/BaseLlmAdapter.js)):
+- **Consistent interface**: `generateCaption(params)`, `suggestHashtags(params)`,
+  `repurposeContent(params)`, `generateVariants(params)`, `evaluateTone(params)`,
+  `checkSensitivity(params)`, and `healthCheck()`.
+- **Swappable & mockable**: Registered in `llmAdapterRegistry`
+  ([`backend/src/services/llm/llmAdapterRegistry.js`](../backend/src/services/llm/llmAdapterRegistry.js)),
+  with [`AiServiceLlmAdapter`](../backend/src/services/llm/AiServiceLlmAdapter.js) registered as the
+  default provider (`ai-service`). Controllers, `contentAdaptation.service.js`, and F09 guardrail
+  evaluators resolve `getLlmAdapter(...)`, allowing providers to be swapped or mocked cleanly in tests.
 
 ## AI microservice boundary
 
@@ -119,14 +164,14 @@ The AI service is deliberately isolated from the core backend:
   compatible SDK against Groq) better than Node.
 - It's a stateless request/response service — no data store, no shared
   state with the backend.
-- The Express backend proxies all AI calls (`/api/v1/ai/*`) rather than the
-  frontend calling the AI service directly, keeping JWT auth and rate
-  limiting in one place.
+- The Express backend proxies all AI calls (`/api/v1/ai/*`) via `AiServiceLlmAdapter` rather than
+  the frontend calling the AI service directly, keeping JWT auth, rate limiting, and provider
+  swapping in one place.
 - Two independent fallback layers exist so the demo never hard-fails: the
   AI service itself falls back to a template generator if no
-  `GROQ_API_KEY`/`OPENAI_API_KEY` is set, and the backend's `ai.controller.js`
-  falls back to its own built-in generator if the AI service is unreachable
-  at all.
+  `GROQ_API_KEY`/`OPENAI_API_KEY` is set, and the backend's `ai.controller.js` /
+  `contentAdaptation.service.js` fall back to built-in generators if the active LLM
+  adapter returns `null` or is unreachable.
 
 ## Media uploads
 
@@ -139,15 +184,10 @@ page refresh: it was never written anywhere durable.
 ## Known limitations (intentional at this stage)
 
 - No object storage for uploaded media (base64 in memory only).
-- Publish jobs are in-process only; a backend restart drops in-flight
-  publishes (MongoDB rows survive).
-- Sandbox social accounts (no Page token) cannot hit the real Graph API.
-- Dashboard quick publish (`frontend/app/dashboard/page.jsx`) omits
-  `socialAccountId`, so that path always uses the sandbox simulator.
+- When running in local development mode without Redis, in-memory queue timers
+  do not persist across process restarts; in production with `REDIS_URL` or
+  `REDIS_HOST`, BullMQ provides durable persistence.
+- Sandbox social accounts (no live token) run against the sandbox simulators.
 - Live Instagram publish sends `image_url`; uploads in this app are `data:`
   URLs, which Graph cannot fetch. Facebook `/photos` already uploads those
   as multipart `source`.
-- Only Facebook and Instagram are supported anywhere in the app (AI
-  generation, publish destinations).
-- Automated tests are thin: backend has a health check
-  (`backend/tests/health.test.js`); CI also lints and builds the frontend.

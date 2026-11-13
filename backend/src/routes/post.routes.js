@@ -12,14 +12,16 @@ router.post("/", requireWorkspaceRole("owner", "editor"), controller.create);
 router.get("/top-performing", controller.getTopPerforming);
 router.post("/generate-variants", requireWorkspaceRole("owner", "editor"), controller.generateVariants);
 router.post("/batch-create", requireWorkspaceRole("owner", "editor"), controller.batchCreate);
-router.post("/publish-approved", requireWorkspaceRole("owner", "editor"), controller.publishApproved);
+router.post("/publish-approved", requireWorkspaceRole("owner"), controller.publishApproved);
 router.get("/:id", controller.getById);
+router.get("/:id/metrics", controller.getPostMetrics);
+router.post("/:id/metrics/refresh", requireWorkspaceRole("owner", "editor"), controller.refreshPostMetrics);
 router.put("/:id", requireWorkspaceRole("owner", "editor"), controller.update);
 router.post("/:id/repurpose", requireWorkspaceRole("owner", "editor"), controller.repurposePost);
 router.post("/:id/submit-approval", requireWorkspaceRole("owner", "editor"), controller.submitApproval);
 router.post("/:id/approve", requireWorkspaceRole("owner"), controller.approve);
 router.post("/:id/request-changes", requireWorkspaceRole("owner"), controller.requestChanges);
-router.post("/:id/publish-now", requireWorkspaceRole("owner", "editor"), controller.publishNow);
+router.post("/:id/publish-now", requireWorkspaceRole("owner"), controller.publishNow);
 router.delete("/:id", requireWorkspaceRole("owner"), controller.deletePost);
 
 module.exports = router;

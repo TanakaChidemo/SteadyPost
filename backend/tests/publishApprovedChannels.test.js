@@ -6,6 +6,7 @@ const membershipModel = require("../src/models/membership.model");
 const userModel = require("../src/models/user.model");
 const socialAccountModel = require("../src/models/socialAccount.model");
 const postModel = require("../src/models/post.model");
+const contentDraftModel = require("../src/models/contentDraft.model");
 
 const { closeQueues } = require("../src/queue");
 
@@ -71,7 +72,7 @@ describe("Omnichannel Approved Post Publishing & Handoff Tests (#10 & F27)", () 
   });
 
   afterAll(async () => {
-    closeQueues();
+    await closeQueues();
     if (workspace) {
       await workspaceModel.deleteOne({ _id: workspace.id });
       await membershipModel.deleteOne({ workspaceId: workspace.id });
@@ -195,6 +196,189 @@ describe("Omnichannel Approved Post Publishing & Handoff Tests (#10 & F27)", () 
       expect(approveRes.status).toBe(200);
       expect(approveRes.body.status).toBe("scheduled");
     });
+
+    it("publishes or schedules a single draft to 3 connected channels simultaneously via /publish/now", async () => {
+      const draft = await contentDraftModel.create({
+        workspaceId: workspace.id,
+        ownerId: user.id,
+        title: "3-Channel Release",
+        body: "Live across Facebook, Instagram, and Google Business Profile!",
+        platforms: ["facebook", "instagram", "gbp"],
+      });
+
+      const futureIso = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      const res = await request(app)
+        .post("/api/v1/publish/now")
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id)
+        .send({
+          contentDraftId: draft._id,
+          socialAccountIds: [fbAccount.id, igAccount.id, gbpAccount.id],
+          scheduledAt: futureIso,
+          options: {
+            topicType: "OFFER",
+            callToAction: { actionType: "ORDER", url: "https://example.com/order" },
+          },
+        });
+
+      expect(res.status).toBe(202);
+      expect(res.body.status).toBe("scheduled");
+      expect(res.body.delay).toBeGreaterThan(0);
+      expect(res.body.items).toHaveLength(3);
+
+      const pairs = res.body.items.map((item) => ({
+        platform: item.platform,
+        socialAccountId: item.socialAccountId,
+        status: item.status,
+      }));
+      expect(pairs).toEqual(
+        expect.arrayContaining([
+          { platform: "facebook", socialAccountId: fbAccount.id, status: "scheduled" },
+          { platform: "instagram", socialAccountId: igAccount.id, status: "scheduled" },
+          { platform: "gbp", socialAccountId: gbpAccount.id, status: "scheduled" },
+        ])
+      );
+
+      // Polling status endpoint works for workspace owner and returns scheduledAt
+      const statusRes = await request(app)
+        .get(`/api/v1/publish/status/${res.body.items[0].postId}`)
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id);
+      expect(statusRes.status).toBe(200);
+      expect(statusRes.body.status).toBe("scheduled");
+      expect(statusRes.body.scheduledAt).toBeTruthy();
+    });
+
+    it("allows workspace owner to publish a workspace draft authored by an editor and isolates foreign workspaces", async () => {
+      const editorUser = await userModel.create({
+        email: `editor_pub_${Date.now()}@example.com`,
+        name: "Workspace Editor",
+      });
+      await membershipModel.create({
+        workspaceId: workspace.id,
+        userId: editorUser.id,
+        role: "editor",
+        status: "active",
+        joinedAt: new Date(),
+      });
+      const editorToken = createToken({ ...editorUser, activeWorkspaceId: workspace.id });
+
+      const outsiderUser = await userModel.create({
+        email: `outsider_pub_${Date.now()}@example.com`,
+        name: "Outsider Owner",
+      });
+      const outsiderWs = await workspaceModel.create({
+        name: "Outsider Venture",
+        ownerId: outsiderUser.id,
+      });
+      await membershipModel.create({
+        workspaceId: outsiderWs.id,
+        userId: outsiderUser.id,
+        role: "owner",
+        status: "active",
+        joinedAt: new Date(),
+      });
+      const outsiderToken = createToken({ ...outsiderUser, activeWorkspaceId: outsiderWs.id });
+
+      const createDraftRes = await request(app)
+        .post("/api/v1/content")
+        .set("Authorization", `Bearer ${editorToken}`)
+        .set("X-Workspace-Id", workspace.id)
+        .send({
+          title: "Editor Draft",
+          body: "Written by editor, published by workspace owner.",
+          platforms: ["facebook"],
+        });
+      expect(createDraftRes.status).toBe(201);
+      expect(createDraftRes.body.workspaceId).toBe(workspace.id);
+
+      // Editor cannot publish directly (owner-only RBAC preserved)
+      const editorPubRes = await request(app)
+        .post("/api/v1/publish/now")
+        .set("Authorization", `Bearer ${editorToken}`)
+        .set("X-Workspace-Id", workspace.id)
+        .send({ contentDraftId: createDraftRes.body._id, socialAccountIds: [fbAccount.id] });
+      expect(editorPubRes.status).toBe(403);
+
+      // Cross-tenant outsider cannot publish this draft
+      const outsiderPubRes = await request(app)
+        .post("/api/v1/publish/now")
+        .set("Authorization", `Bearer ${outsiderToken}`)
+        .set("X-Workspace-Id", outsiderWs.id)
+        .send({ contentDraftId: createDraftRes.body._id });
+      expect(outsiderPubRes.status).toBe(404);
+
+      // Workspace owner CAN publish the editor's draft to the workspace account
+      const ownerPubRes = await request(app)
+        .post("/api/v1/publish/now")
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id)
+        .send({ contentDraftId: createDraftRes.body._id, socialAccountIds: [fbAccount.id] });
+      expect(ownerPubRes.status).toBe(202);
+      expect(ownerPubRes.body.socialAccountId).toBe(fbAccount.id);
+
+      await workspaceModel.deleteOne({ _id: outsiderWs.id });
+      await membershipModel.deleteOne({ workspaceId: outsiderWs.id });
+    });
+
+    it("supports scheduledAt and account ownership validation on POST /posts/:id/publish-now", async () => {
+      const draftPost = await postModel.create({
+        workspaceId: workspace.id,
+        authorId: user.id,
+        channel: "gbp",
+        content: { title: "Single Post Schedule", body: "Scheduled Local Post" },
+        status: "approved",
+      });
+
+      const futureIso = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+      const res = await request(app)
+        .post(`/api/v1/posts/${draftPost.id}/publish-now`)
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id)
+        .send({
+          scheduledAt: futureIso,
+          socialAccountId: gbpAccount.id,
+          options: { topicType: "EVENT" },
+        });
+
+      expect(res.status).toBe(202);
+      expect(res.body.status).toBe("scheduled");
+      expect(res.body.delay).toBeGreaterThan(0);
+
+      const persisted = await postModel.findById(draftPost.id);
+      expect(persisted.status).toBe("scheduled");
+      expect(persisted.socialAccountId).toBe(gbpAccount.id);
+    });
+
+    it("returns 200 on /publish/status/:id when polling a Post record created from pipeline", async () => {
+      const pipelinePost = await postModel.create({
+        workspaceId: workspace.id,
+        authorId: user.id,
+        channel: "twitter",
+        socialAccountId: twAccount.id,
+        content: { title: "Pipeline Polling Test", body: "Testing /publish/status/:id fallback" },
+        status: "approved",
+      });
+
+      const pubRes = await request(app)
+        .post(`/api/v1/posts/${pipelinePost.id}/publish-now`)
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id)
+        .send();
+
+      expect(pubRes.status).toBe(202);
+
+      // Studio polls /publish/status/:id — must return 200 with Post record, not 404
+      const statusRes = await request(app)
+        .get(`/api/v1/publish/status/${pipelinePost.id}`)
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id);
+
+      expect(statusRes.status).toBe(200);
+      expect(statusRes.body.id).toBe(pipelinePost.id);
+      expect(statusRes.body.platform).toBe("twitter");
+      expect(["publishing", "published"]).toContain(statusRes.body.status);
+    });
   });
 
   describe("Connect Step Setup Walkthrough Handoff (#08, F27)", () => {
@@ -229,11 +413,6 @@ describe("Omnichannel Approved Post Publishing & Handoff Tests (#10 & F27)", () 
         global.fetch = originalFetch;
       }
     });
-  });
-
-  afterAll(async () => {
-    closeQueues();
-    await teardownTestDB();
   });
 });
 

@@ -1,5 +1,4 @@
-const logger = require("../config/logger");
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:5001";
+const { getLlmAdapter, llmAdapterRegistry } = require("./llm/llmAdapterRegistry");
 
 const PLATFORM_SPECS = {
   twitter: {
@@ -29,6 +28,13 @@ const PLATFORM_SPECS = {
     maxChars: 5000,
     maxHashtags: 4,
     guidelines: "Conversational, community-oriented, invites comments and questions.",
+  },
+  gbp: {
+    id: "gbp",
+    name: "Google Business Profile",
+    maxChars: 1500,
+    maxHashtags: 3,
+    guidelines: "Concise local update, clear customer benefit, and actionable call-to-action.",
   },
 };
 
@@ -67,34 +73,41 @@ function buildLocalChannelVariant({
   _businessProfile = null,
   sourcePost = null,
 }) {
-  const spec = PLATFORM_SPECS[channel] || PLATFORM_SPECS.instagram;
+  const normalizedChannel = channel === "google_business" ? "gbp" : channel;
+  const spec = PLATFORM_SPECS[normalizedChannel] || PLATFORM_SPECS.instagram;
   const cleanIdea = idea.trim().replace(/\s+/g, " ");
 
   let title = `${spec.name} Post: ${cleanIdea.slice(0, 30)}...`;
   let body = "";
   const hashtags = extractKeywords(cleanIdea, spec.maxHashtags);
 
-  if (channel === "twitter") {
+  if (normalizedChannel === "twitter") {
     title = `Tweet: ${cleanIdea.slice(0, 30)}...`;
     const prefix = tone === "professional" || tone === "authoritative" ? "💡 " : "✨ ";
     body = clampText(`${prefix}${cleanIdea}`, spec.maxChars);
-  } else if (channel === "linkedin") {
+  } else if (normalizedChannel === "linkedin") {
     title = `LinkedIn Insight: ${cleanIdea.slice(0, 35)}...`;
     const callout =
       tone === "casual" || tone === "playful"
         ? "What has your experience been with this? Let's connect below."
         : "What has your perspective or strategy been on this? Looking forward to hearing your insights in the comments.";
     body = clampText(`${cleanIdea}\n\n${callout}`, spec.maxChars);
-  } else if (channel === "instagram") {
+  } else if (normalizedChannel === "instagram") {
     title = `Instagram Post: ${cleanIdea.slice(0, 35)}...`;
     body = clampText(
       `${cleanIdea}\n\nSave this for later and share your thoughts below! 📌`,
       spec.maxChars
     );
-  } else if (channel === "facebook") {
+  } else if (normalizedChannel === "facebook") {
     title = `Facebook Update: ${cleanIdea.slice(0, 35)}...`;
     body = clampText(
       `${cleanIdea}\n\nWhat are your thoughts on this? Join the conversation below! 👇`,
+      spec.maxChars
+    );
+  } else if (normalizedChannel === "gbp") {
+    title = `GBP Local Update: ${cleanIdea.slice(0, 35)}...`;
+    body = clampText(
+      `${cleanIdea}\n\nLearn more or visit us today!`,
       spec.maxChars
     );
   } else {
@@ -118,24 +131,17 @@ function buildLocalChannelVariant({
 }
 
 async function forwardToAiService(path, body) {
-  try {
+  const adapter = getLlmAdapter();
+  if (typeof adapter._postJson === "function") {
     const timeoutMs = parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 12000;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    const response = await fetch(`${AI_SERVICE_URL}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
+    return adapter._postJson(path, body, {
+      timeoutMs,
+      logLevel: "warn",
+      reason: "AI service unavailable, using local template adaptation",
     });
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      return await response.json();
-    }
-  } catch (err) {
-    logger.warn({ err: err.message, path }, "AI service unavailable, using local template adaptation");
+  }
+  if (path === "/generate/variants" && typeof adapter.generateVariants === "function") {
+    return adapter.generateVariants(body);
   }
   return null;
 }
@@ -146,8 +152,9 @@ async function adaptIdeaToChannels({
   tone = "professional",
   businessProfile = null,
   sourcePost = null,
+  llmProvider = undefined,
 }) {
-  const allowed = ["twitter", "linkedin", "instagram", "facebook"];
+  const allowed = ["twitter", "linkedin", "instagram", "facebook", "gbp", "google_business"];
   let targetChannels = ["instagram", "facebook"];
   if (Array.isArray(channels)) {
     if (channels.length === 0) {
@@ -166,7 +173,15 @@ async function adaptIdeaToChannels({
     targetChannels = filtered;
   }
 
-  // 1. Try remote AI service (Groq / OpenRouter / Gemini / OpenAI)
+  // 1. Try registered LLM adapter (defaults to Python AI service / Groq / OpenRouter / Gemini / OpenAI)
+  if (llmProvider && !llmAdapterRegistry.has(llmProvider)) {
+    const err = new Error(
+      `Unsupported LLM provider: '${llmProvider}'. Supported: ${llmAdapterRegistry.listProviders().join(", ")}`
+    );
+    err.status = 400;
+    throw err;
+  }
+
   const aiPayload = {
     idea,
     channels: targetChannels,
@@ -189,31 +204,60 @@ async function adaptIdeaToChannels({
       : null,
   };
 
-  const aiResult = await forwardToAiService("/generate/variants", aiPayload);
+  const aiResult = await getLlmAdapter(llmProvider).generateVariants(aiPayload);
 
   if (aiResult && Array.isArray(aiResult.variants) && aiResult.variants.length > 0) {
-    return {
-      idea,
-      tone,
-      sourcePostId: sourcePost?.id || sourcePost?._id || null,
-      variants: aiResult.variants.map((v) => {
-        const spec = PLATFORM_SPECS[v.channel] || PLATFORM_SPECS.instagram;
-        const clampedBody = clampText(v.content?.body || "", spec.maxChars);
+    const aiVariantsByChannel = new Map();
+    for (const v of aiResult.variants) {
+      const normalized = String(v?.channel || "").toLowerCase().trim();
+      const canonical = normalized === "google_business" ? "gbp" : normalized;
+      if (canonical && !aiVariantsByChannel.has(canonical)) {
+        aiVariantsByChannel.set(canonical, v);
+      }
+    }
+
+    const mergedVariants = targetChannels.map((channel) => {
+      const specKey = channel === "google_business" ? "gbp" : channel;
+      const spec = PLATFORM_SPECS[specKey] || PLATFORM_SPECS.instagram;
+      const aiVariant = aiVariantsByChannel.get(specKey);
+
+      if (aiVariant) {
+        const rawBody = aiVariant.content?.body ?? aiVariant.body ?? "";
+        const rawTitle = aiVariant.content?.title ?? aiVariant.title;
+        const rawMediaUrls = aiVariant.content?.mediaUrls ?? aiVariant.mediaUrls;
+        const rawHashtags = aiVariant.content?.hashtags ?? aiVariant.hashtags;
+        const clampedBody = clampText(rawBody, spec.maxChars);
+
         return {
-          channel: v.channel,
+          channel,
           content: {
-            title: v.content?.title || `${spec.name} Post: ${idea.slice(0, 30)}...`,
+            title: rawTitle || `${spec.name} Post: ${idea.slice(0, 30)}...`,
             body: clampedBody,
-            mediaUrls: sourcePost?.content?.mediaUrls || v.content?.mediaUrls || [],
-            hashtags: v.content?.hashtags || extractKeywords(clampedBody, spec.maxHashtags),
+            mediaUrls: sourcePost?.content?.mediaUrls || rawMediaUrls || [],
+            hashtags: rawHashtags || extractKeywords(clampedBody, spec.maxHashtags),
           },
           tone,
           charCount: clampedBody.length,
           maxChars: spec.maxChars,
-          provider: v.provider || aiResult.provider || "template",
-          model: v.model || aiResult.model || "template-fallback",
+          provider: aiVariant.provider || aiResult.provider || "template",
+          model: aiVariant.model || aiResult.model || "template-fallback",
         };
-      }),
+      }
+
+      return buildLocalChannelVariant({
+        channel,
+        idea,
+        tone,
+        businessProfile,
+        sourcePost,
+      });
+    });
+
+    return {
+      idea,
+      tone,
+      sourcePostId: sourcePost?.id || sourcePost?._id || null,
+      variants: mergedVariants,
     };
   }
 

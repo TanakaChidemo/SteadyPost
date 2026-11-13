@@ -156,9 +156,9 @@ export const api = {
   publish: {
     now: (data) => apiClient.post("/publish/now", data).then((r) => r.data),
     getStatus: (id) => apiClient.get(`/publish/status/${id}`).then((r) => r.data),
-    // Publish jobs run async on the backend (202 Publishing -> published/failed).
-    // Poll status instead of trusting the 202 response, so real failures (e.g. an
-    // Instagram media-format rejection) surface to the user instead of being silent.
+    // Publish jobs run async on the backend (202 publishing/scheduled -> published/failed).
+    // Poll status instead of trusting the 202 response so real failures surface to the user.
+    // Scheduled posts (delay > 0) return immediately with status === "scheduled".
     waitForResult: async (postId, { intervalMs = 800, timeoutMs = 12000 } = {}) => {
       const start = Date.now();
       let last = null;
@@ -205,8 +205,10 @@ export const api = {
     submitApproval: (id, data = {}) => apiClient.post(`/posts/${id}/submit-approval`, data).then((r) => r.data),
     approve: (id, data = {}) => apiClient.post(`/posts/${id}/approve`, data).then((r) => r.data),
     requestChanges: (id, data = {}) => apiClient.post(`/posts/${id}/request-changes`, data).then((r) => r.data),
-    publishNow: (id) => apiClient.post(`/posts/${id}/publish-now`).then((r) => r.data),
+    publishNow: (id, data = {}) => apiClient.post(`/posts/${id}/publish-now`, data).then((r) => r.data),
     publishApproved: (data = {}) => apiClient.post("/posts/publish-approved", data).then((r) => r.data),
+    getMetrics: (id) => apiClient.get(`/posts/${id}/metrics`).then((r) => r.data),
+    refreshMetrics: (id) => apiClient.post(`/posts/${id}/metrics/refresh`).then((r) => r.data),
   },
   website: {
     // Reads a site without saving anything (used before a workspace exists).

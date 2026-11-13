@@ -1,58 +1,49 @@
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:5001";
-const logger = require("../config/logger");
 const businessProfileModel = require("../models/businessProfile.model");
 const guardrailsService = require("../services/guardrails/guardrailsService");
 const contentAdaptationService = require("../services/contentAdaptation.service");
+const { getLlmAdapter, llmAdapterRegistry } = require("../services/llm/llmAdapterRegistry");
+
+function checkProvider(provider, res) {
+  if (provider && !llmAdapterRegistry.has(provider)) {
+    res.status(400).json({
+      error: `Unsupported LLM provider: '${provider}'. Supported: ${llmAdapterRegistry.listProviders().join(", ")}`,
+    });
+    return false;
+  }
+  return true;
+}
 
 const PLATFORM_STYLES = {
   twitter: {
-    format: (topic, tone) => `💡 ${topic}\n\nKey takeaway: Stay consistent and optimize for engagement.\n\n#Growth #Tech`,
+    format: (topic, _tone) => `💡 ${topic}\n\nKey takeaway: Stay consistent and optimize for engagement.\n\n#Growth #Tech`,
     maxTags: 3,
   },
   instagram: {
-    format: (topic, tone) =>
+    format: (topic, _tone) =>
       `✨ ${topic}\n\nCreating impactful content takes strategy, clarity, and consistency. Swipe to see how we build systems that scale! 🚀\n\nDrop your thoughts below 👇\n\n#ContentStrategy #CreatorEconomy #GrowthMindset #Innovation`,
     maxTags: 8,
   },
   linkedin: {
-    format: (topic, tone) =>
+    format: (topic, _tone) =>
       `How we approach ${topic}:\n\n1. Identify the core friction points\n2. Design scalable distribution workflows\n3. Measure conversion, not just vanity metrics\n\nWhat is your team's biggest focus this quarter?\n\n#Leadership #B2BStrategy #Productivity #BusinessGrowth`,
     maxTags: 5,
   },
   facebook: {
-    format: (topic, tone) =>
+    format: (topic, _tone) =>
       `Excited to share insights on ${topic}! 🌟 Let us know in the comments how your team is approaching this today. Join the discussion!`,
     maxTags: 4,
   },
+  gbp: {
+    format: (topic, _tone) =>
+      `📍 ${topic}\n\nVisit or message us today to learn more and book directly with our team.`,
+    maxTags: 3,
+  },
 };
 
-async function forwardToAiService(path, body) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 16000);
-
-    const response = await fetch(`${AI_SERVICE_URL}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      return await response.json();
-    }
-  } catch (err) {
-    logger.warn({ err: err.message, path }, "AI service unavailable, using built-in generator");
-  }
-
-  // Built-in intelligent fallback
-  return null;
-}
-
 async function generateCaption(req, res) {
-  const { topic, platform = "instagram", tone } = req.body;
+  const { topic, platform = "instagram", tone, provider } = req.body;
   if (!topic) return res.status(400).json({ error: "topic is required" });
+  if (!checkProvider(provider, res)) return;
 
   let effectiveTone = tone;
   let profile = null;
@@ -75,7 +66,8 @@ async function generateCaption(req, res) {
 
   if (!effectiveTone) effectiveTone = "casual";
 
-  const aiResult = await forwardToAiService("/generate/caption", {
+  const llmAdapter = getLlmAdapter(provider);
+  const aiResult = await llmAdapter.generateCaption({
     ...req.body,
     tone: effectiveTone,
     businessProfile: profileContext,
@@ -138,7 +130,7 @@ async function generateCaption(req, res) {
     platform,
     caption: localCaption,
     model: "steadypost-ai-engine-v2",
-    tone,
+    tone: effectiveTone,
     guardrails,
     candidates: [
       {
@@ -155,10 +147,11 @@ async function generateCaption(req, res) {
 }
 
 async function suggestHashtags(req, res) {
-  const { content = "", platform = "instagram", maxTags = 8 } = req.body;
+  const { content = "", platform = "instagram", maxTags = 8, provider } = req.body;
   if (!content) return res.status(400).json({ error: "content is required" });
+  if (!checkProvider(provider, res)) return;
 
-  const aiResult = await forwardToAiService("/generate/hashtags", {
+  const aiResult = await getLlmAdapter(provider).suggestHashtags({
     ...req.body,
     userId: req.user.id,
   });
@@ -183,12 +176,13 @@ async function suggestHashtags(req, res) {
 }
 
 async function repurposeContent(req, res) {
-  const { content, sourcePlatform = "twitter", targetPlatforms = [] } = req.body;
+  const { content, sourcePlatform = "twitter", targetPlatforms = [], provider } = req.body;
   if (!content || !targetPlatforms || targetPlatforms.length === 0) {
     return res.status(400).json({ error: "content and targetPlatforms are required" });
   }
+  if (!checkProvider(provider, res)) return;
 
-  const aiResult = await forwardToAiService("/generate/repurpose", {
+  const aiResult = await getLlmAdapter(provider).repurposeContent({
     ...req.body,
     userId: req.user.id,
   });
@@ -205,6 +199,8 @@ async function repurposeContent(req, res) {
         activeRepurposed[target] = `✨ ${content}\n\nSwipe to see more insights! 👉\n\n#CreatorLife #DigitalGrowth #Motivation #Strategy`;
       } else if (target === "facebook") {
         activeRepurposed[target] = `${content}\n\nWhat are your thoughts on this? Let us know in the comments below! 👇`;
+      } else if (target === "gbp" || target === "google_business") {
+        activeRepurposed[target] = `📍 ${content}\n\nContact or visit us today to learn more!`;
       } else {
         activeRepurposed[target] = content;
       }
@@ -237,9 +233,10 @@ async function repurposeContent(req, res) {
 }
 
 async function generateVariants(req, res) {
-  const { idea, topic, channels = ["twitter", "linkedin", "instagram", "facebook"], tone } = req.body;
+  const { idea, topic, channels = ["twitter", "linkedin", "instagram", "facebook"], tone, provider } = req.body;
   const contentIdea = idea || topic;
   if (!contentIdea) return res.status(400).json({ error: "idea or topic is required" });
+  if (!checkProvider(provider, res)) return;
 
   let effectiveTone = tone;
   let businessProfile = null;
@@ -257,6 +254,7 @@ async function generateVariants(req, res) {
       channels,
       tone: effectiveTone,
       businessProfile,
+      llmProvider: provider,
     });
     return res.json(result);
   } catch (err) {
