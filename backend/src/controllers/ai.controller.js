@@ -1,7 +1,17 @@
 const businessProfileModel = require("../models/businessProfile.model");
 const guardrailsService = require("../services/guardrails/guardrailsService");
 const contentAdaptationService = require("../services/contentAdaptation.service");
-const { getLlmAdapter } = require("../services/llm/llmAdapterRegistry");
+const { getLlmAdapter, llmAdapterRegistry } = require("../services/llm/llmAdapterRegistry");
+
+function checkProvider(provider, res) {
+  if (provider && !llmAdapterRegistry.has(provider)) {
+    res.status(400).json({
+      error: `Unsupported LLM provider: '${provider}'. Supported: ${llmAdapterRegistry.listProviders().join(", ")}`,
+    });
+    return false;
+  }
+  return true;
+}
 
 const PLATFORM_STYLES = {
   twitter: {
@@ -33,6 +43,7 @@ const PLATFORM_STYLES = {
 async function generateCaption(req, res) {
   const { topic, platform = "instagram", tone, provider } = req.body;
   if (!topic) return res.status(400).json({ error: "topic is required" });
+  if (!checkProvider(provider, res)) return;
 
   let effectiveTone = tone;
   let profile = null;
@@ -138,6 +149,7 @@ async function generateCaption(req, res) {
 async function suggestHashtags(req, res) {
   const { content = "", platform = "instagram", maxTags = 8, provider } = req.body;
   if (!content) return res.status(400).json({ error: "content is required" });
+  if (!checkProvider(provider, res)) return;
 
   const aiResult = await getLlmAdapter(provider).suggestHashtags({
     ...req.body,
@@ -168,6 +180,7 @@ async function repurposeContent(req, res) {
   if (!content || !targetPlatforms || targetPlatforms.length === 0) {
     return res.status(400).json({ error: "content and targetPlatforms are required" });
   }
+  if (!checkProvider(provider, res)) return;
 
   const aiResult = await getLlmAdapter(provider).repurposeContent({
     ...req.body,
@@ -223,6 +236,7 @@ async function generateVariants(req, res) {
   const { idea, topic, channels = ["twitter", "linkedin", "instagram", "facebook"], tone, provider } = req.body;
   const contentIdea = idea || topic;
   if (!contentIdea) return res.status(400).json({ error: "idea or topic is required" });
+  if (!checkProvider(provider, res)) return;
 
   let effectiveTone = tone;
   let businessProfile = null;

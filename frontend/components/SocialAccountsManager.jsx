@@ -398,8 +398,8 @@ export function SocialAccountsManager() {
                           {connectingPageId === page.id
                             ? "Connecting..."
                             : alreadyConnected
-                            ? "Refresh token"
-                            : "Connect"}
+                              ? "Refresh token"
+                              : "Connect"}
                         </span>
                       </button>
                     );

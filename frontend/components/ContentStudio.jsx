@@ -115,7 +115,6 @@ export function ContentStudio() {
   const [postActionId, setPostActionId] = useState(null);
   const [metricsByPost, setMetricsByPost] = useState({});
   const [refreshingMetricsId, setRefreshingMetricsId] = useState(null);
-  const [queuingPipeline, setQueuingPipeline] = useState(false);
 
   async function handleCheckGuardrails() {
     if (!body.trim()) {
@@ -315,7 +314,7 @@ export function ContentStudio() {
       return addToast("error", "Connect a social account first — see the Social Accounts page.");
     }
     if (!isOwner) {
-      return addToast("error", "Only workspace owners can publish directly. Use Submit for Approval instead.");
+      return addToast("error", "Only workspace owners can publish posts.");
     }
 
     const scheduledIso = getValidatedScheduledIso();
@@ -404,94 +403,6 @@ export function ContentStudio() {
     }
   }
 
-  async function handleQueueToPipeline() {
-    if (!title.trim()) return addToast("error", "Post title is required");
-    if (!body.trim()) return addToast("error", "Post copy is required");
-    if (selectedAccountIds.length === 0) {
-      return addToast("error", "Select at least one connected account first.");
-    }
-
-    const scheduledIso = getValidatedScheduledIso();
-    if (scheduledIso === undefined) return;
-
-    setQueuingPipeline(true);
-    try {
-      const createdPosts = [];
-      for (const accountId of selectedAccountIds) {
-        const account = socialAccounts.find((a) => a.id === accountId);
-        if (!account) continue;
-        const channel = normalizePlatformId(account.platform);
-        const created = await api.posts.create({
-          title,
-          body,
-          channel,
-          socialAccountId: account.id,
-          mediaUrls,
-          ...(scheduledIso ? { scheduledAt: scheduledIso } : {}),
-          ...(channel === "gbp" && Object.keys(gbpOptionsPayload).length > 0
-            ? { aiMetadata: { gbpOptions: gbpOptionsPayload } }
-            : {}),
-        });
-        await api.posts.submitApproval(created.id);
-        createdPosts.push(created);
-      }
-
-      addToast(
-        "success",
-        `Submitted ${createdPosts.length} channel post(s) to the Publishing Pipeline for approval!`
-      );
-      loadPosts();
-    } catch (err) {
-      addToast("error", err.response?.data?.error || err.message || "Failed to queue post");
-    } finally {
-      setQueuingPipeline(false);
-    }
-  }
-
-  async function handleSubmitPostApproval(postId) {
-    setPostActionId(postId);
-    try {
-      await api.posts.submitApproval(postId);
-      addToast("success", "Submitted post for approval");
-      loadPosts();
-    } catch (err) {
-      addToast("error", err.response?.data?.error || err.message || "Submit failed");
-    } finally {
-      setPostActionId(null);
-    }
-  }
-
-  async function handleApprovePost(postId) {
-    setPostActionId(postId);
-    try {
-      const updated = await api.posts.approve(postId);
-      addToast(
-        "success",
-        updated.status === "scheduled"
-          ? "Approved and queued for scheduled publication!"
-          : "Post approved — ready to publish."
-      );
-      loadPosts();
-    } catch (err) {
-      addToast("error", err.response?.data?.error || err.message || "Approval failed");
-    } finally {
-      setPostActionId(null);
-    }
-  }
-
-  async function handleRequestPostChanges(postId) {
-    setPostActionId(postId);
-    try {
-      await api.posts.requestChanges(postId, { comment: "Please revise copy before publishing." });
-      addToast("info", "Marked as changes requested");
-      loadPosts();
-    } catch (err) {
-      addToast("error", err.response?.data?.error || err.message || "Action failed");
-    } finally {
-      setPostActionId(null);
-    }
-  }
-
   async function handlePublishPipelinePost(post) {
     setPostActionId(post.id);
     try {
@@ -499,7 +410,7 @@ export function ContentStudio() {
       if (res.status === "scheduled") {
         addToast("success", `Scheduled ${post.channel} post via queue`);
       } else {
-        const result = await api.publish.waitForResult(res.postId);
+        const result = await api.publish.waitForResult(res.postId || post.id);
         if (result.status === "published") {
           addToast("success", `Published ${post.channel} post successfully!`);
         } else {
@@ -532,11 +443,14 @@ export function ContentStudio() {
       }
 
       if (immediate.length > 0) {
-        const results = await Promise.all(
+        const settled = await Promise.allSettled(
           immediate.map(async (item) => ({ item, res: await api.publish.waitForResult(item.postId) }))
         );
+        const results = settled
+          .filter((s) => s.status === "fulfilled")
+          .map((s) => s.value);
         const okCount = results.filter((r) => r.res.status === "published").length;
-        const failCount = results.length - okCount;
+        const failCount = immediate.length - okCount;
         if (okCount > 0) addToast("success", `Published ${okCount} approved post(s)!`);
         if (failCount > 0) addToast("error", `${failCount} post(s) failed to publish`);
       }
@@ -1048,20 +962,7 @@ export function ContentStudio() {
                 >
                   {loading ? "Saving…" : "Save as Draft"}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleQueueToPipeline}
-                  disabled={loading || publishing || queuingPipeline}
-                  className="px-4 py-2 rounded-md bg-indigo-950/70 hover:bg-indigo-900/70 border border-indigo-500/40 text-xs font-semibold text-indigo-200 transition disabled:opacity-60"
-                >
-                  {queuingPipeline ? "Submitting…" : "Send to Approval Pipeline"}
-                </button>
               </div>
-              {!isOwner && (
-                <span className="text-[11px] text-amber-300">
-                  Workspace role: {workspaceRole} — submit for owner approval before publishing.
-                </span>
-              )}
             </div>
           </div>
         </div>
@@ -1441,8 +1342,6 @@ export function ContentStudio() {
         <div className="flex flex-wrap items-center gap-1.5">
           {[
             { id: "all", label: "All" },
-            { id: "draft", label: "Drafts" },
-            { id: "pending_approval", label: "Pending Approval" },
             { id: "approved", label: "Approved" },
             { id: "scheduled", label: "Scheduled" },
             { id: "published", label: "Published" },
@@ -1465,9 +1364,7 @@ export function ContentStudio() {
 
         {filteredPipelinePosts.length === 0 ? (
           <div className="py-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-md">
-            No pipeline posts match this filter yet. Create content above and click{" "}
-            <span className="text-indigo-300 font-semibold">Send to Approval Pipeline</span> or{" "}
-            <span className="text-indigo-300 font-semibold">Write with AI</span>.
+            No pipeline posts match this filter. Posts approved for publishing appear here with live queue tracking and engagement metrics.
           </div>
         ) : (
           <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1">
@@ -1509,36 +1406,6 @@ export function ContentStudio() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                      {(post.status === "draft" || post.status === "changes_requested") && (
-                        <button
-                          type="button"
-                          onClick={() => handleSubmitPostApproval(post.id)}
-                          disabled={isBusy}
-                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold transition"
-                        >
-                          Submit for Approval
-                        </button>
-                      )}
-                      {post.status === "pending_approval" && isOwner && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => handleApprovePost(post.id)}
-                            disabled={isBusy}
-                            className="px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-semibold transition"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRequestPostChanges(post.id)}
-                            disabled={isBusy}
-                            className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
-                          >
-                            Request Changes
-                          </button>
-                        </>
-                      )}
                       {(post.status === "approved" || post.status === "failed") && isOwner && (
                         <button
                           type="button"

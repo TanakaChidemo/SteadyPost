@@ -1,4 +1,4 @@
-const { getLlmAdapter } = require("./llm/llmAdapterRegistry");
+const { getLlmAdapter, llmAdapterRegistry } = require("./llm/llmAdapterRegistry");
 
 const PLATFORM_SPECS = {
   twitter: {
@@ -174,6 +174,14 @@ async function adaptIdeaToChannels({
   }
 
   // 1. Try registered LLM adapter (defaults to Python AI service / Groq / OpenRouter / Gemini / OpenAI)
+  if (llmProvider && !llmAdapterRegistry.has(llmProvider)) {
+    const err = new Error(
+      `Unsupported LLM provider: '${llmProvider}'. Supported: ${llmAdapterRegistry.listProviders().join(", ")}`
+    );
+    err.status = 400;
+    throw err;
+  }
+
   const aiPayload = {
     idea,
     channels: targetChannels,

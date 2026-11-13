@@ -25,7 +25,7 @@ async function create(req, res) {
   }
 
   const { title, body, platforms = [], mediaUrls = [], aiMetadata = {} } = parsed.data;
-  const effectiveWorkspaceId = req.workspaceId || req.user?.activeWorkspaceId || null;
+  const effectiveWorkspaceId = req.workspaceId;
 
   // Guardrail checks (tone, banned claims, disclosures) are currently channel-independent,
   // so auditing against the primary target platform (platforms[0]) is sufficient.
@@ -100,7 +100,7 @@ async function update(req, res) {
       content: draft.body || "",
       channel: draft.platforms?.[0] || "instagram",
       mediaUrls: draft.mediaUrls || [],
-      workspaceId: req.workspaceId || draft.workspaceId || req.user?.activeWorkspaceId || null,
+      workspaceId: req.workspaceId || draft.workspaceId || null,
     });
     draft.aiMetadata = { ...(draft.aiMetadata || {}), guardrails };
   }

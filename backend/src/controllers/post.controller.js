@@ -518,12 +518,19 @@ async function refreshPostMetrics(req, res) {
   });
 
   const adapter = getAdapter(post.channel);
-  const collected = await adapter.getMetrics({
-    externalPostId: post.externalPostId,
-    postId: post.id,
-    account,
-    platform: post.channel,
-  });
+  let collected;
+  try {
+    collected = await adapter.getMetrics({
+      externalPostId: post.externalPostId,
+      postId: post.id,
+      account,
+      platform: post.channel,
+    });
+  } catch (err) {
+    return res.status(502).json({
+      error: `Platform metrics collection failed: ${err.message || "Failed to reach platform API"}`,
+    });
+  }
 
   const snapshot = await postMetricsModel.create({
     postId: post.id,

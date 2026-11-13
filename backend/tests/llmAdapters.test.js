@@ -239,5 +239,16 @@ describe("LLM Adapter Interface & Registry Swappability Tests (#10)", () => {
       expect(partialAdapted.variants[1].channel).toBe("gbp");
       expect(partialAdapted.variants[1].provider).toBe("template");
     });
+
+    it("returns 400 when an unsupported provider is passed to AI routes", async () => {
+      const res = await request(app)
+        .post("/api/v1/ai/generate-caption")
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id)
+        .send({ topic: "Coffee", platform: "instagram", provider: "nope" });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("Unsupported LLM provider: 'nope'");
+    });
   });
 });

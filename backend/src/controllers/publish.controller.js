@@ -1,6 +1,7 @@
 const { z } = require("zod");
 const { enqueuePublishJob } = require("../queue");
 const ContentDraft = require("../models/contentDraft.model");
+const postModel = require("../models/post.model");
 const scheduledPostModel = require("../models/scheduledPost.model");
 const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
 
@@ -181,22 +182,49 @@ async function getStatus(req, res) {
   const { scheduledPostId } = req.params;
   if (!scheduledPostId) return res.status(400).json({ error: "scheduledPostId is required" });
 
-  const post = await scheduledPostModel.findOne({ id: scheduledPostId });
-  const workspaceScope = req.workspaceId || req.user?.activeWorkspaceId || null;
-  const canView = Boolean(
-    post && (post.ownerId === req.user.id || (post.workspaceId && workspaceScope && post.workspaceId === workspaceScope))
-  );
-  if (!canView) return res.status(404).json({ error: "Scheduled post not found" });
+  const workspaceScope = req.workspaceId;
 
-  return res.json({
-    id: post.id,
-    status: post.status,
-    platform: post.platform,
-    externalPostId: post.externalPostId,
-    errorMessage: post.errorMessage,
-    scheduledAt: post.scheduledAt,
-    updatedAt: post.updatedAt,
-  });
+  // 1. Check ScheduledPost collection (from /publish/now draft publishing)
+  const scheduledDoc = await scheduledPostModel.findOne({ id: scheduledPostId });
+  if (scheduledDoc) {
+    const canView = Boolean(
+      scheduledDoc.ownerId === req.user.id ||
+        (scheduledDoc.workspaceId && workspaceScope && scheduledDoc.workspaceId === workspaceScope)
+    );
+    if (!canView) return res.status(404).json({ error: "Scheduled post not found" });
+
+    return res.json({
+      id: scheduledDoc.id,
+      status: scheduledDoc.status,
+      platform: scheduledDoc.platform,
+      externalPostId: scheduledDoc.externalPostId,
+      errorMessage: scheduledDoc.errorMessage,
+      scheduledAt: scheduledDoc.scheduledAt,
+      updatedAt: scheduledDoc.updatedAt,
+    });
+  }
+
+  // 2. Fall back to Post collection (from pipeline /posts/:id/publish-now and /posts/publish-approved)
+  const postDoc = await postModel.findById(scheduledPostId);
+  if (postDoc) {
+    const canView = Boolean(
+      postDoc.authorId === req.user.id ||
+        (postDoc.workspaceId && workspaceScope && postDoc.workspaceId === workspaceScope)
+    );
+    if (!canView) return res.status(404).json({ error: "Scheduled post not found" });
+
+    return res.json({
+      id: postDoc.id || postDoc._id,
+      status: postDoc.status,
+      platform: postDoc.channel,
+      externalPostId: postDoc.externalPostId || null,
+      errorMessage: postDoc.errorMessage || null,
+      scheduledAt: postDoc.scheduledAt || null,
+      updatedAt: postDoc.updatedAt || postDoc.publishedAt,
+    });
+  }
+
+  return res.status(404).json({ error: "Scheduled post not found" });
 }
 
 module.exports = { publishNow, getStatus };

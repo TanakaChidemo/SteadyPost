@@ -375,6 +375,38 @@ describe("Job Queue, Retries & Metrics Collection Tests (#10)", () => {
       expect(refreshRes.status).toBe(200);
       expect(refreshRes.body.latestMetrics.reach).toBeGreaterThanOrEqual(300);
     });
+
+    it("returns 502 Bad Gateway when channel adapter getMetrics fails on refresh", async () => {
+      const failingMetricsPost = await postModel.create({
+        workspaceId: workspace.id,
+        authorId: user.id,
+        channel: "twitter",
+        content: { title: "Failing Metrics", body: "Check error handling" },
+        status: "published",
+        externalPostId: "tw_fail_123",
+      });
+
+      class FailingMetricsAdapter extends BaseAdapter {
+        constructor() {
+          super("twitter");
+        }
+        async publish() {
+          return { externalId: "tw_fail_123" };
+        }
+        async getMetrics() {
+          throw new Error("Rate limit exceeded on X API v2");
+        }
+      }
+      adapterRegistry.register("twitter", new FailingMetricsAdapter());
+
+      const res = await request(app)
+        .post(`/api/v1/posts/${failingMetricsPost.id}/metrics/refresh`)
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id);
+
+      expect(res.status).toBe(502);
+      expect(res.body.error).toContain("Platform metrics collection failed: Rate limit exceeded on X API v2");
+    });
   });
 
   describe("BullMQ Redis Queue Integration Mode", () => {

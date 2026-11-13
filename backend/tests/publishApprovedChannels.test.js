@@ -349,6 +349,36 @@ describe("Omnichannel Approved Post Publishing & Handoff Tests (#10 & F27)", () 
       expect(persisted.status).toBe("scheduled");
       expect(persisted.socialAccountId).toBe(gbpAccount.id);
     });
+
+    it("returns 200 on /publish/status/:id when polling a Post record created from pipeline", async () => {
+      const pipelinePost = await postModel.create({
+        workspaceId: workspace.id,
+        authorId: user.id,
+        channel: "twitter",
+        socialAccountId: twAccount.id,
+        content: { title: "Pipeline Polling Test", body: "Testing /publish/status/:id fallback" },
+        status: "approved",
+      });
+
+      const pubRes = await request(app)
+        .post(`/api/v1/posts/${pipelinePost.id}/publish-now`)
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id)
+        .send();
+
+      expect(pubRes.status).toBe(202);
+
+      // Studio polls /publish/status/:id — must return 200 with Post record, not 404
+      const statusRes = await request(app)
+        .get(`/api/v1/publish/status/${pipelinePost.id}`)
+        .set("Authorization", `Bearer ${token}`)
+        .set("X-Workspace-Id", workspace.id);
+
+      expect(statusRes.status).toBe(200);
+      expect(statusRes.body.id).toBe(pipelinePost.id);
+      expect(statusRes.body.platform).toBe("twitter");
+      expect(["publishing", "published"]).toContain(statusRes.body.status);
+    });
   });
 
   describe("Connect Step Setup Walkthrough Handoff (#08, F27)", () => {
