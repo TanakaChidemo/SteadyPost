@@ -4,6 +4,14 @@ const postModel = require("../models/post.model");
 const postMetricsModel = require("../models/postMetrics.model");
 const socialAccountModel = require("../models/socialAccount.model");
 const { getAdapter } = require("../services/publishers/adapterRegistry");
+const { enqueueMetricsJob, getMetricsQueue } = require("./jobQueue");
+
+function normalizePlatformKey(platform) {
+  const key = String(platform || "").toLowerCase().trim();
+  if (key === "google_business" || key === "google") return "gbp";
+  if (key === "x") return "twitter";
+  return key;
+}
 
 /**
  * Resolves account credentials for the given socialAccountId and workspaceId.
@@ -31,10 +39,11 @@ async function resolveAccountCredentials({ socialAccountId, workspaceId, platfor
     }
   }
 
-  // If no socialAccountId provided or not found, try to find an account for the workspace
+  // If no socialAccountId provided or not found, try to find an account strictly for the workspace
   if (workspaceId && platform) {
-    const accounts = await socialAccountModel.list(workspaceId);
-    const matching = accounts.find((a) => a.platform === platform);
+    const targetKey = normalizePlatformKey(platform);
+    const workspaceAccounts = await socialAccountModel.list({ workspaceId });
+    const matching = workspaceAccounts.find((a) => normalizePlatformKey(a.platform) === targetKey);
     if (matching) {
       return {
         id: matching.id || matching._id,
@@ -107,7 +116,7 @@ async function processPublishJob(job) {
       })
       .catch(() => {});
 
-    // 5. Collect initial resulting metrics
+    // 5. Collect initial resulting metrics & schedule follow-up snapshot
     try {
       const initialMetrics = await adapter.getMetrics({
         externalPostId,
@@ -128,6 +137,29 @@ async function processPublishJob(job) {
         });
         logger.info({ postId, platform, initialMetrics }, "Collected resulting metrics for post");
       }
+
+      const rawFollowUpDelay =
+        typeof options.metricsFollowUpDelayMs === "number"
+          ? options.metricsFollowUpDelayMs
+          : Number.parseInt(process.env.METRICS_FOLLOWUP_DELAY_MS, 10);
+      const followUpDelayMs = Number.isFinite(rawFollowUpDelay) ? rawFollowUpDelay : 5 * 60 * 1000;
+
+      if (followUpDelayMs >= 0 && process.env.DISABLE_FOLLOWUP_METRICS !== "true") {
+        await enqueueMetricsJob(
+          {
+            postId,
+            externalPostId,
+            platform,
+            socialAccountId: account.id || socialAccountId || null,
+            workspaceId,
+          },
+          { delay: followUpDelayMs }
+        );
+        const metricsQueue = getMetricsQueue();
+        if (metricsQueue && !metricsQueue.processor && typeof metricsQueue.setProcessor === "function") {
+          metricsQueue.setProcessor(processMetricsJob);
+        }
+      }
     } catch (metricErr) {
       logger.warn({ postId, platform, err: metricErr.message }, "Non-blocking metrics collection error");
     }
@@ -136,7 +168,7 @@ async function processPublishJob(job) {
     return result;
   } catch (err) {
     const attemptsMade = (job.attemptsMade || 0) + 1;
-    const maxRetries = job.opts?.maxRetries || 3;
+    const maxRetries = job.opts?.maxRetries || job.opts?.attempts || 3;
     const willRetry = attemptsMade < maxRetries;
 
     logger.error(

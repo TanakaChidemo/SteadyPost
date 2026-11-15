@@ -210,9 +210,10 @@ export function OnboardingWizard({ prefill = null }) {
       }
       addToast("success", `${payload.name} is set up`);
       closeOnboarding();
-      // Channel setup hook: #08 (F27) replaces this with its step-by-step
-      // channel-connection walkthrough.
-      if (goToAccounts) router.push("/dashboard/accounts");
+      // Hands off to the Social Accounts page (connect modal auto-opens when
+      // requested, and Meta connect opens Setup Walkthrough #08/F27 if no Page
+      // or professional account is found).
+      if (goToAccounts) router.push("/dashboard/accounts?connect=1");
     } catch (err) {
       setError(profileErrorMessage(err, "Couldn't save your profile. Please try again."));
     } finally {

@@ -9,6 +9,9 @@ import {
   UsersIcon,
   InstagramIcon,
   FacebookIcon,
+  TwitterIcon,
+  LinkedInIcon,
+  GoogleIcon,
 } from "./Icons";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
@@ -120,24 +123,25 @@ export function Sidebar() {
             </Link>
           </div>
           <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <div className="flex items-center gap-2">
-                <InstagramIcon className="w-3.5 h-3.5 text-pink-400" />
-                <span>Instagram</span>
-              </div>
-              <span
-                className={`w-2 h-2 rounded-full ${isConnected("instagram") ? "bg-emerald-400" : "bg-slate-700"}`}
-              />
-            </div>
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <div className="flex items-center gap-2">
-                <FacebookIcon className="w-3.5 h-3.5 text-blue-500" />
-                <span>Facebook</span>
-              </div>
-              <span
-                className={`w-2 h-2 rounded-full ${isConnected("facebook") ? "bg-emerald-400" : "bg-slate-700"}`}
-              />
-            </div>
+            {[
+              { key: "instagram", label: "Instagram", icon: InstagramIcon, color: "text-pink-400" },
+              { key: "facebook", label: "Facebook", icon: FacebookIcon, color: "text-blue-500" },
+              { key: "twitter", label: "Twitter / X", icon: TwitterIcon, color: "text-sky-400" },
+              { key: "linkedin", label: "LinkedIn", icon: LinkedInIcon, color: "text-blue-400" },
+              { key: "gbp", label: "Google Business", icon: GoogleIcon, color: "text-amber-400", altKey: "google_business" },
+            ].map((ch) => {
+              const Icon = ch.icon;
+              const active = isConnected(ch.key) || (ch.altKey ? isConnected(ch.altKey) : false);
+              return (
+                <div key={ch.key} className="flex items-center justify-between text-xs text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <Icon className={`w-3.5 h-3.5 ${ch.color}`} />
+                    <span>{ch.label}</span>
+                  </div>
+                  <span className={`w-2 h-2 rounded-full ${active ? "bg-emerald-400" : "bg-slate-700"}`} />
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

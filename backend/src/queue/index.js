@@ -6,6 +6,7 @@ const {
   cancelPublishJob,
   getPublishQueue,
   getMetricsQueue,
+  isBullMqMode,
   closeQueues,
 } = require("./jobQueue");
 const { processPublishJob, processMetricsJob } = require("./publishProcessor");
@@ -31,5 +32,6 @@ module.exports = {
   cancelPublishJob,
   getPublishQueue,
   getMetricsQueue,
+  isBullMqMode,
   closeQueues,
 };

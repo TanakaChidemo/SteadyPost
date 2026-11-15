@@ -1,5 +1,5 @@
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:5001";
 const logger = require("../../config/logger");
+const { getLlmAdapter } = require("../llm/llmAdapterRegistry");
 
 // Idioms that must NOT trigger sensitivity flags
 const BENIGN_IDIOMS = [
@@ -135,20 +135,9 @@ async function checkTrendSensitivity({
     return localResult;
   }
 
-  let timeoutId;
   try {
-    const controller = new AbortController();
-    timeoutId = setTimeout(() => controller.abort(), 2000);
-
-    const response = await fetch(`${AI_SERVICE_URL}/guardrails/sensitivity`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, snippet, sensitivityLevel }),
-      signal: controller.signal,
-    });
-
-    if (response.ok) {
-      const data = await response.json();
+    const data = await getLlmAdapter().checkSensitivity({ topic, snippet, sensitivityLevel });
+    if (data) {
       if (data.source === "fallback") {
         return localResult;
       }
@@ -162,8 +151,6 @@ async function checkTrendSensitivity({
   } catch (err) {
     // Graceful fallback to local result
     logger.debug({ err: err.message }, "AI service sensitivity check unavailable, using local evaluator");
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
   }
 
   return localResult;

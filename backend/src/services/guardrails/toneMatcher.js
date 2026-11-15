@@ -1,5 +1,5 @@
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:5001";
 const logger = require("../../config/logger");
+const { getLlmAdapter } = require("../llm/llmAdapterRegistry");
 
 const TONE_KEYWORDS = {
   professional: ["strategy", "efficiency", "analysis", "workflow", "optimize", "deliver", "performance", "quarter", "results"],
@@ -103,35 +103,20 @@ async function checkTone({
     return localResult;
   }
 
-  let timeoutId;
   try {
-    const controller = new AbortController();
-    timeoutId = setTimeout(() => controller.abort(), 2500);
-
-    const response = await fetch(`${AI_SERVICE_URL}/guardrails/tone`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, targetTones, strictness }),
-      signal: controller.signal,
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.source !== "fallback") {
-        return {
-          passed: Boolean(data.passed),
-          score: typeof data.score === "number" ? data.score : localResult.score,
-          detectedTone: data.detectedTone || localResult.detectedTone,
-          targetTone: targetTones,
-          critique: data.critique || null,
-          suggestions: data.suggestions || localResult.suggestions,
-        };
-      }
+    const data = await getLlmAdapter().evaluateTone({ content, targetTones, strictness });
+    if (data && data.source !== "fallback") {
+      return {
+        passed: Boolean(data.passed),
+        score: typeof data.score === "number" ? data.score : localResult.score,
+        detectedTone: data.detectedTone || localResult.detectedTone,
+        targetTone: targetTones,
+        critique: data.critique || null,
+        suggestions: data.suggestions || localResult.suggestions,
+      };
     }
   } catch (err) {
     logger.debug({ err: err.message }, "AI service tone check unavailable, using local tone evaluator");
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
   }
 
   return localResult;

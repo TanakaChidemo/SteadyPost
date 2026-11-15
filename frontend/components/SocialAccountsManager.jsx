@@ -81,6 +81,16 @@ export function SocialAccountsManager() {
     if (authReady && user) loadAccounts();
   }, [authReady, token, user]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("walkthrough") === "1") {
+      setIsWalkthroughOpen(true);
+    } else if (params.get("connect") === "1") {
+      setIsConnectModalOpen(true);
+    }
+  }, []);
+
   async function handleConnectWithMeta() {
     // Channels belong to a business profile, so never start Meta's login signed out.
     if (!user) return setAuthModalOpen(true);
@@ -388,8 +398,8 @@ export function SocialAccountsManager() {
                           {connectingPageId === page.id
                             ? "Connecting..."
                             : alreadyConnected
-                            ? "Refresh token"
-                            : "Connect"}
+                              ? "Refresh token"
+                              : "Connect"}
                         </span>
                       </button>
                     );

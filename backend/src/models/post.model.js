@@ -32,6 +32,7 @@ const postSchema = new mongoose.Schema(
         "changes_requested",
         "approved",
         "scheduled",
+        "publishing",
         "published",
         "failed",
       ],

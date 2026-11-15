@@ -114,7 +114,15 @@ class InMemoryJobQueue extends EventEmitter {
       clearTimeout(this.timers.get(key));
       this.timers.delete(key);
       const job = this.jobs.get(key);
-      if (job) job.status = "cancelled";
+      if (job) {
+        job.status = "cancelled";
+      } else {
+        for (const item of this.jobs.values()) {
+          if (item.data?.postId === key && item.status !== "completed" && item.status !== "failed") {
+            item.status = "cancelled";
+          }
+        }
+      }
       return true;
     }
     return false;
@@ -133,9 +141,11 @@ class InMemoryJobQueue extends EventEmitter {
   }
 }
 
-// Global queue instances
+// Global queue & worker instances
 let publishQueueInstance = null;
 let metricsQueueInstance = null;
+let publishWorkerInstance = null;
+let metricsWorkerInstance = null;
 let isRedisBullMode = false;
 
 function initQueues({ processPublishJob, processMetricsJob } = {}) {
@@ -149,10 +159,10 @@ function initQueues({ processPublishJob, processMetricsJob } = {}) {
       metricsQueueInstance = new BullQueue("metrics_jobs", { connection });
 
       if (processPublishJob) {
-        new BullWorker("publish_jobs", processPublishJob, { connection });
+        publishWorkerInstance = new BullWorker("publish_jobs", processPublishJob, { connection });
       }
       if (processMetricsJob) {
-        new BullWorker("metrics_jobs", processMetricsJob, { connection });
+        metricsWorkerInstance = new BullWorker("metrics_jobs", processMetricsJob, { connection });
       }
 
       isRedisBullMode = true;
@@ -165,6 +175,8 @@ function initQueues({ processPublishJob, processMetricsJob } = {}) {
 
   // Fallback to In-Memory Queue
   isRedisBullMode = false;
+  publishWorkerInstance = null;
+  metricsWorkerInstance = null;
   publishQueueInstance = new InMemoryJobQueue("publish_jobs");
   metricsQueueInstance = new InMemoryJobQueue("metrics_jobs");
 
@@ -256,6 +268,10 @@ function getMetricsQueue() {
   return metricsQueueInstance;
 }
 
+function isBullMqMode() {
+  return isRedisBullMode;
+}
+
 function closeQueues() {
   if (publishQueueInstance && typeof publishQueueInstance.clear === "function") {
     publishQueueInstance.clear();
@@ -263,6 +279,21 @@ function closeQueues() {
   if (metricsQueueInstance && typeof metricsQueueInstance.clear === "function") {
     metricsQueueInstance.clear();
   }
+
+  const closers = [];
+  for (const instance of [publishWorkerInstance, metricsWorkerInstance, publishQueueInstance, metricsQueueInstance]) {
+    if (instance && typeof instance.close === "function") {
+      closers.push(Promise.resolve(instance.close()).catch(() => {}));
+    }
+  }
+  publishWorkerInstance = null;
+  metricsWorkerInstance = null;
+  if (isRedisBullMode) {
+    publishQueueInstance = null;
+    metricsQueueInstance = null;
+    isRedisBullMode = false;
+  }
+  return Promise.all(closers);
 }
 
 module.exports = {
@@ -273,5 +304,6 @@ module.exports = {
   cancelPublishJob,
   getPublishQueue,
   getMetricsQueue,
+  isBullMqMode,
   closeQueues,
 };
