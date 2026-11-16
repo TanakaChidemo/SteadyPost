@@ -142,8 +142,47 @@ Every publishing channel inherits from `BaseAdapter`
   - Meta (`facebook`, `instagram`)
   - Twitter / X (`twitter`)
   - LinkedIn (`linkedin`)
-  - Google Business Profile (`gbp`) for Local Posts (#13) with `topicType` (`STANDARD` | `EVENT` | `OFFER`),
-    `callToAction` buttons, offers, events, and photo support.
+  - Google Business Profile (`gbp`) for Local Posts (#13) supporting four topic types (`STANDARD`, `EVENT`, `OFFER`, `ALERT`), six call-to-action buttons (`BOOK`, `ORDER`, `SHOP`, `LEARN_MORE`, `SIGN_UP`, `CALL`), and media attachments.
+
+### Google Business Profile (GBP) Local Posts (#13) Architecture
+
+Google Business Profile allows local businesses to publish timely announcements, events, and promotions directly to Google Search and Google Maps. `GbpAdapter` (`backend/src/services/publishers/GbpAdapter.js`) implements this capability behind the shared `BaseAdapter` interface:
+
+#### 1. Local Post Types & Fields
+The Google Business Profile Local Posts API requires specific payload structures per topic type:
+- `STANDARD`: General business announcements with optional CTA button and photo attachments.
+- `EVENT`: Scheduled events requiring `event.title` and `event.schedule` (`startDate`, `startTime`, `endDate`, `endTime`).
+- `OFFER`: Promotional deals requiring `offer.couponCode`, `offer.redeemOnlineUrl`, and `offer.termsConditions`.
+- `ALERT`: Safety and operational notices requiring `alertType` (e.g. `COVID_19`), pinned prominently to the listing.
+
+#### 2. Call-To-Action (CTA) Actions
+GBP supports six CTA button actions:
+- Web destination CTAs: `BOOK`, `ORDER`, `SHOP`, `LEARN_MORE`, `SIGN_UP` (require valid target URL; automatically fall back to workspace `websiteUrl`).
+- Phone call CTA: `CALL` (omits target URL; Google routes directly to the phone number configured on the business profile).
+
+#### 3. Access Risk Mitigation & Posting Aggregator Evaluation
+Google strictly gates direct access to the Business Profile API behind an OAuth allowlist application process that often requires weeks or months of review. To satisfy project timelines while maintaining high architectural fidelity:
+- **Architecture design**: `GbpAdapter` encapsulates direct API access, third-party posting aggregators (e.g. `bundle.social`, `ayrshare`), and sandbox simulation behind the **exact same adapter interface**.
+- **Mode switching**: Controlled seamlessly via environment variables (`GBP_POSTING_MODE=aggregator|direct|simulator`, `GBP_AGGREGATOR_URL`, `GBP_AGGREGATOR_API_KEY`).
+- **Composer isolation**: The frontend Content Studio, BullMQ job queue, and database models interact exclusively with the adapter registry (`adapterRegistry.getAdapter("gbp")`), making direct API vs aggregator posting completely interchangeable without modifying a single line of application code.
+- **Reference Contract Note**: The JSON request payload currently emitted by `publishViaAggregator` is an architectural reference/prototype contract modeling multi-channel aggregator dispatch; production deployments integrating with specific vendors (such as bundle.social or Ayrshare) should align the payload schema to that vendor's exact endpoint spec.
+
+| Approach | Direct Google Business Profile API | Posting Aggregator (bundle.social) | SteadyPost Architecture Choice |
+| :--- | :--- | :--- | :--- |
+| **Approval Timeline** | Several weeks / months (strict Google allowlist review) | Instant (uses aggregator's pre-approved API quota) | **Hybrid Adapter**: Aggregator for immediate production, direct API as documented stretch |
+| **API Complexity** | Complex multi-stage OAuth, location path resolving (`accounts/{id}/locations/{id}`) | Single unified REST endpoint for multi-location dispatch | **Abstracted**: `GbpAdapter` handles both transparently |
+| **Cost** | Free (within Google API quota) | Commercial aggregator subscription | **Configurable**: Configurable per deployment environment |
+
+#### 4. Deprecated Per-Post Insights & Smart-Link Tracking Integration (#12)
+Google deprecated per-post insights for GBP Local Posts with no direct API replacement. Consequently:
+- Google API reports no granular post-level reach, impressions, or likes.
+- In SteadyPost, post-level performance for GBP is driven entirely by **Smart-Link Tracking (#12)**: `GbpAdapter.getMetrics()` queries `smartLinkModel.findByPostId(postId)` to aggregate genuine CTA click and link engagement analytics.
+
+#### 5. Listing Verification Guardrail & Setup Walkthrough Handoff (#08, F27)
+Google rejects Local Posts on unverified business listings. SteadyPost guards against publishing errors:
+- Account linking tracks `verificationState` (`VERIFIED`, `PENDING_VERIFICATION`, `UNVERIFIED`). Anything other than `VERIFIED` is treated as not publishable.
+- Attempting to publish to an unverified or pending location fails fast with `400 Bad Request` (`code: "GBP_LISTING_UNVERIFIED", handoff: "setup_walkthrough", walkthroughStep: 5`). Drafting remains unrestricted so businesses can prepare posts while waiting for Google verification to complete.
+- The UI directs owners to Step 5 of the Setup Walkthrough modal (`SetupWalkthroughModal.jsx`), guiding them through Google's postcard, phone, or video verification process or offering instant Sandbox Mode testing.
 
 ### LLM provider adapters
 All AI/LLM calls across controllers and services sit behind `BaseLlmAdapter`

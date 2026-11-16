@@ -67,7 +67,9 @@ export function SocialAccountsManager() {
   const manages = can(currentWorkspace, "accounts.manage");
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
+  const [walkthroughStep, setWalkthroughStep] = useState(1);
   const [selectedChannel, setSelectedChannel] = useState("instagram");
+  const [gbpVerificationState, setGbpVerificationState] = useState("VERIFIED");
   const [accountHandle, setAccountHandle] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -122,6 +124,11 @@ export function SocialAccountsManager() {
       addToast("error", err.message || "Could not load Facebook Login");
       setMetaConnecting(false);
     }
+  }
+
+  function handleConnectWithGoogle() {
+    const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") || "http://localhost:4000";
+    window.location.href = `${backendUrl}/api/v1/auth/oauth/google`;
   }
 
   async function handleMetaLoginResponse(accessToken) {
@@ -196,6 +203,12 @@ export function SocialAccountsManager() {
         platform: selectedChannel,
         handle: accountHandle,
         displayName: displayName || `${accountHandle} (${selectedChannel.toUpperCase()})`,
+        ...(selectedChannel === "gbp"
+          ? {
+              verificationState: gbpVerificationState,
+              isVerified: gbpVerificationState === "VERIFIED",
+            }
+          : {}),
       });
 
       setSocialAccounts([...socialAccounts, created]);
@@ -329,6 +342,35 @@ export function SocialAccountsManager() {
                             {account.isLive ? "Connected · Live" : "Demo Account · Sandbox"}
                           </span>
                         </div>
+                        {(account.platform === "gbp" || account.platform === "google_business") && (
+                          <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-900">
+                            <span className="text-slate-500 font-medium">Listing:</span>
+                            {account.isVerified && account.verificationState === "VERIFIED" ? (
+                              <span className="text-emerald-400 font-medium flex items-center gap-1">
+                                <CheckIcon className="w-3 h-3" />
+                                Verified Location
+                              </span>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-amber-400 font-medium">
+                                  {account.verificationState === "PENDING_VERIFICATION"
+                                    ? "Verification Pending"
+                                    : "Unverified Listing"}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setWalkthroughStep(5);
+                                    setIsWalkthroughOpen(true);
+                                  }}
+                                  className="text-[10px] text-amber-300 underline hover:text-amber-200 transition"
+                                >
+                                  Verify (F27)
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -436,15 +478,49 @@ export function SocialAccountsManager() {
                   Authorize publishing access for multi-platform scheduling.
                 </p>
 
-                <button
-                  type="button"
-                  onClick={handleConnectWithMeta}
-                  disabled={metaConnecting}
-                  className="w-full mb-4 py-2.5 px-4 rounded-md bg-[#1877F2] hover:bg-[#1567d6] text-white text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-60"
-                >
-                  <FacebookIcon className="w-4 h-4" />
-                  <span>{metaConnecting ? "Waiting for Facebook..." : "Connect with Facebook (Meta OAuth)"}</span>
-                </button>
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-slate-300 mb-1">Select Channel to Connect</label>
+                  <select
+                    value={selectedChannel}
+                    onChange={(e) => setSelectedChannel(e.target.value)}
+                    className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="instagram">Instagram Business</option>
+                    <option value="facebook">Facebook Page</option>
+                    <option value="gbp">Google Business Profile (GBP Local Posts #13)</option>
+                    <option value="twitter">Twitter / X</option>
+                    <option value="linkedin">LinkedIn</option>
+                  </select>
+                </div>
+
+                {selectedChannel === "gbp" ? (
+                  <button
+                    type="button"
+                    onClick={handleConnectWithGoogle}
+                    className="w-full mb-4 py-2.5 px-4 rounded-md bg-white hover:bg-slate-100 text-slate-900 text-xs font-semibold flex items-center justify-center gap-2 transition"
+                  >
+                    <GoogleIcon className="w-4 h-4" />
+                    <span>Connect with Google (Google Sign-In)</span>
+                  </button>
+                ) : selectedChannel === "facebook" || selectedChannel === "instagram" ? (
+                  <button
+                    type="button"
+                    onClick={handleConnectWithMeta}
+                    disabled={metaConnecting}
+                    className="w-full mb-4 py-2.5 px-4 rounded-md bg-[#1877F2] hover:bg-[#1567d6] text-white text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-60"
+                  >
+                    <FacebookIcon className="w-4 h-4" />
+                    <span>{metaConnecting ? "Waiting for Facebook..." : "Connect with Facebook (Meta OAuth)"}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full mb-4 py-2.5 px-4 rounded-md bg-slate-800 text-slate-400 text-xs font-semibold flex items-center justify-center gap-2 cursor-not-allowed"
+                  >
+                    <span>OAuth coming in card #10.1 — use sandbox below</span>
+                  </button>
+                )}
 
                 <div className="flex items-center my-3 text-slate-600 text-xs">
                   <div className="flex-1 border-t border-slate-800" />
@@ -458,30 +534,15 @@ export function SocialAccountsManager() {
 
                 <form onSubmit={handleConnect} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">Platform</label>
-                    <select
-                      value={selectedChannel}
-                      onChange={(e) => setSelectedChannel(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
-                    >
-                      <option value="instagram">Instagram Business</option>
-                      <option value="facebook">Facebook Page</option>
-                      <option value="twitter">Twitter / X</option>
-                      <option value="linkedin">LinkedIn</option>
-                      <option value="gbp">Google Business Profile (GBP Local Posts #13)</option>
-                    </select>
-                  </div>
-
-                  <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Account Handle or Page ID
+                      {selectedChannel === "gbp" ? "Location Name or ID" : "Account Handle or Page ID"}
                     </label>
                     <input
                       type="text"
                       required
                       value={accountHandle}
                       onChange={(e) => setAccountHandle(e.target.value)}
-                      placeholder="@company_official or page_109238"
+                      placeholder={selectedChannel === "gbp" ? "e.g. Olivia's Annex or locations/109238" : "@company_official or page_109238"}
                       className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -498,6 +559,26 @@ export function SocialAccountsManager() {
                       className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
+
+                  {selectedChannel === "gbp" && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">
+                        Listing Verification Status (#13)
+                      </label>
+                      <select
+                        value={gbpVerificationState}
+                        onChange={(e) => setGbpVerificationState(e.target.value)}
+                        className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500"
+                      >
+                        <option value="VERIFIED">Verified Listing (Can publish Local Posts)</option>
+                        <option value="PENDING_VERIFICATION">Pending Verification (Takes several business days)</option>
+                        <option value="UNVERIFIED">Unverified Listing (Test F27 Setup Walkthrough handoff)</option>
+                      </select>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Google gates posting on verified locations. Select &apos;Pending&apos; or &apos;Unverified&apos; to test the F27 setup walkthrough handoff.
+                      </p>
+                    </div>
+                  )}
 
                   <button
                     type="submit"
@@ -516,13 +597,28 @@ export function SocialAccountsManager() {
       {/* Setup Walkthrough Modal (#08, F27) */}
       <SetupWalkthroughModal
         isOpen={isWalkthroughOpen}
-        onClose={() => setIsWalkthroughOpen(false)}
-        onRetryConnect={() => {
+        initialStep={walkthroughStep}
+        onClose={() => {
           setIsWalkthroughOpen(false);
-          handleConnectWithMeta();
+          setWalkthroughStep(1);
         }}
-        onUseSandbox={() => {
+        onRetryConnect={(step) => {
           setIsWalkthroughOpen(false);
+          setWalkthroughStep(1);
+          if (step === 5) {
+            setSelectedChannel("gbp");
+            setGbpVerificationState("VERIFIED");
+            setIsConnectModalOpen(true);
+          } else {
+            handleConnectWithMeta();
+          }
+        }}
+        onUseSandbox={(step) => {
+          setIsWalkthroughOpen(false);
+          setWalkthroughStep(1);
+          if (step === 5) {
+            setSelectedChannel("gbp");
+          }
           setIsConnectModalOpen(true);
         }}
       />

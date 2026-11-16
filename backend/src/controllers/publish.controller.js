@@ -4,6 +4,7 @@ const ContentDraft = require("../models/contentDraft.model");
 const postModel = require("../models/post.model");
 const scheduledPostModel = require("../models/scheduledPost.model");
 const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
+const { isGbpAccount, isGbpListingVerified, getGbpUnverifiedError } = require("../utils/gbpValidation");
 
 const publishNowSchema = z.object({
   contentDraftId: z.string().min(1, "contentDraftId is required"),
@@ -70,7 +71,12 @@ async function publishNow(req, res) {
         workspaceId: effectiveWorkspaceId,
         userId: req.user.id,
       });
-      if (account) validatedAccounts.push(account);
+      if (account) {
+        if (isGbpAccount(account) && !isGbpListingVerified(account)) {
+          return res.status(400).json(getGbpUnverifiedError());
+        }
+        validatedAccounts.push(account);
+      }
     } catch (err) {
       return res.status(err.status || 403).json({ error: err.message });
     }

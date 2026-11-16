@@ -1,16 +1,23 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   FacebookIcon,
   InstagramIcon,
+  GoogleIcon,
   CheckIcon,
   ArrowUpRightIcon,
   LayersIcon,
 } from "./Icons";
 
-export function SetupWalkthroughModal({ isOpen, onClose, onRetryConnect, onUseSandbox }) {
-  const [activeStep, setActiveStep] = useState(1);
+export function SetupWalkthroughModal({ isOpen, onClose, onRetryConnect, onUseSandbox, initialStep = 1 }) {
+  const [activeStep, setActiveStep] = useState(initialStep);
+
+  useEffect(() => {
+    if (initialStep) {
+      setActiveStep(initialStep);
+    }
+  }, [initialStep, isOpen]);
 
   if (!isOpen) return null;
 
@@ -77,6 +84,22 @@ export function SetupWalkthroughModal({ isOpen, onClose, onRetryConnect, onUseSa
       ],
       linkText: "Meta Business Suite Users",
       linkUrl: "https://business.facebook.com/latest/settings/people",
+    },
+    {
+      number: 5,
+      title: "Verify Google Business Profile",
+      badge: "GBP Local Posts (#13)",
+      icon: GoogleIcon,
+      color: "text-amber-400 bg-amber-500/10 border-amber-500/30",
+      description: "Google requires physical or digital location verification before Local Posts, offers, and events appear on Search & Maps.",
+      instructions: [
+        "Open Google Business Profile Manager at business.google.com and select your business location.",
+        "Click 'Get verified' and choose your verification method (Postcard by mail, Phone call/SMS, or Live Video).",
+        "Verification takes several business days (typically 3–5 days) to clear Google's trust and safety review.",
+        "Test accounts should be verified early. For immediate development and testing, use SteadyPost's Sandbox Mode.",
+      ],
+      linkText: "Google Business Profile Verification Guide",
+      linkUrl: "https://support.google.com/business/answer/7107242",
     },
   ];
 
@@ -192,7 +215,15 @@ export function SetupWalkthroughModal({ isOpen, onClose, onRetryConnect, onUseSa
 
           {/* Troubleshooting tip */}
           <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200/90">
-            <strong>Tip:</strong> If you don&apos;t manage a live Facebook Page or Instagram Business account right now, you can link a demo account in <strong>Sandbox Mode</strong> to test multi-channel publishing and metrics immediately.
+            {activeStep === 5 ? (
+              <>
+                <strong>Tip:</strong> If your Google Business Profile listing is pending verification or you don&apos;t manage a verified physical location yet, you can link a demo location in <strong>Sandbox Mode</strong> to test GBP Local Posts immediately.
+              </>
+            ) : (
+              <>
+                <strong>Tip:</strong> If you don&apos;t manage a live Facebook Page or Instagram Business account right now, you can link a demo account in <strong>Sandbox Mode</strong> to test multi-channel publishing and metrics immediately.
+              </>
+            )}
           </div>
         </div>
 
@@ -225,7 +256,7 @@ export function SetupWalkthroughModal({ isOpen, onClose, onRetryConnect, onUseSa
                 type="button"
                 onClick={() => {
                   onClose();
-                  onUseSandbox();
+                  onUseSandbox(activeStep);
                 }}
                 className="px-3.5 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-semibold border border-slate-700 transition"
               >
@@ -237,12 +268,12 @@ export function SetupWalkthroughModal({ isOpen, onClose, onRetryConnect, onUseSa
                 type="button"
                 onClick={() => {
                   onClose();
-                  onRetryConnect();
+                  onRetryConnect(activeStep);
                 }}
                 className="px-4 py-2 rounded-md gradient-brand text-xs text-white font-semibold hover:opacity-95 transition flex items-center gap-1.5"
               >
                 <CheckIcon className="w-4 h-4" />
-                <span>Try Reconnecting Now</span>
+                <span>{activeStep === 5 ? "Reconnect Google Business Profile" : "Try Reconnecting Now"}</span>
               </button>
             )}
           </div>

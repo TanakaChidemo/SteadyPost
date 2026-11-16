@@ -35,6 +35,11 @@ async function resolveAccountCredentials({ socialAccountId, workspaceId, platfor
         workspaceId: account.workspaceId,
         ownerId: account.ownerId,
         platform: account.platform,
+        isVerified:
+          normalizePlatformKey(account.platform) === "gbp"
+            ? account.verificationState === "VERIFIED"
+            : account.isVerified !== false && account.verificationState !== "UNVERIFIED",
+        verificationState: account.verificationState || (account.isVerified === false ? "UNVERIFIED" : "VERIFIED"),
       };
     }
   }
@@ -54,6 +59,11 @@ async function resolveAccountCredentials({ socialAccountId, workspaceId, platfor
         workspaceId: matching.workspaceId,
         ownerId: matching.ownerId,
         platform: matching.platform,
+        isVerified:
+          targetKey === "gbp"
+            ? matching.verificationState === "VERIFIED"
+            : matching.isVerified !== false && matching.verificationState !== "UNVERIFIED",
+        verificationState: matching.verificationState || (matching.isVerified === false ? "UNVERIFIED" : "VERIFIED"),
       };
     }
   }
