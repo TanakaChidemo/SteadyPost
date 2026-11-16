@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const contentController = require("../controllers/content.controller");
 const { requireAuth } = require("../middleware/auth");
+const { resolveWorkspace } = require("../middleware/workspaceContext");
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ const upload = multer({
   },
 });
 
-router.use(requireAuth);
+router.use(requireAuth, resolveWorkspace);
 
 router.get("/", contentController.list);
 router.get("/drafts", contentController.list);

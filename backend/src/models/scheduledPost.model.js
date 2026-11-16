@@ -5,6 +5,7 @@ const scheduledPostSchema = new mongoose.Schema(
   {
     _id: { type: String, default: () => newId("post") },
     ownerId: { type: String, required: true, index: true },
+    workspaceId: { type: String, default: null, index: true },
     contentDraftId: { type: String, required: true },
     platform: { type: String, required: true },
     socialAccountId: { type: String, default: null },
@@ -23,10 +24,11 @@ async function create(data) {
   return withId(doc.toObject());
 }
 
-async function findOne({ id, ownerId } = {}) {
+async function findOne({ id, ownerId, workspaceId } = {}) {
   const query = {};
   if (id) query._id = id;
   if (ownerId) query.ownerId = ownerId;
+  if (workspaceId) query.workspaceId = workspaceId;
   return withId(await ScheduledPost.findOne(query).lean());
 }
 

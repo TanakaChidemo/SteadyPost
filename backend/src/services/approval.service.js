@@ -123,6 +123,7 @@ async function applyApprovalAction({ workspaceId, postId, actorId, role, action,
         content: updated.content?.body || "",
         mediaUrls: updated.content?.mediaUrls || [],
         hashtags: updated.content?.hashtags || [],
+        options: updated.aiMetadata?.gbpOptions || updated.aiMetadata?.options || {},
       },
       { delay: Math.max(0, new Date(updated.scheduledAt).getTime() - Date.now()) }
     );

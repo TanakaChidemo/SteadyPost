@@ -14,6 +14,8 @@ router.post("/generate-variants", requirePermission("post.write"), controller.ge
 router.post("/batch-create", requirePermission("post.write"), controller.batchCreate);
 router.post("/publish-approved", requirePermission("post.publish"), controller.publishApproved);
 router.get("/:id", controller.getById);
+router.get("/:id/metrics", controller.getPostMetrics);
+router.post("/:id/metrics/refresh", requirePermission("post.write"), controller.refreshPostMetrics);
 router.put("/:id", requirePermission("post.write"), controller.update);
 router.post("/:id/repurpose", requirePermission("post.write"), controller.repurposePost);
 router.post("/:id/submit-approval", requirePermission("post.submit"), controller.submitApproval);

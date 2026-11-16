@@ -8,11 +8,22 @@ import {
   SparklesIcon,
   InstagramIcon,
   FacebookIcon,
+  TwitterIcon,
+  LinkedInIcon,
+  GoogleIcon,
   LayersIcon,
   PlusIcon,
   ArrowUpRightIcon,
   SendIcon,
 } from "../../components/Icons";
+
+const QUICK_PLATFORMS = [
+  { id: "instagram", label: "Instagram", icon: InstagramIcon, color: "text-pink-400" },
+  { id: "facebook", label: "Facebook", icon: FacebookIcon, color: "text-blue-500" },
+  { id: "twitter", label: "Twitter / X", icon: TwitterIcon, color: "text-sky-400" },
+  { id: "linkedin", label: "LinkedIn", icon: LinkedInIcon, color: "text-blue-400" },
+  { id: "gbp", label: "Google Business", icon: GoogleIcon, color: "text-amber-400" },
+];
 
 export default function DashboardOverviewPage() {
   const { user, authReady, token, drafts, setDrafts, socialAccounts, addToast, setAiModalOpen, setAuthModalOpen } =
@@ -44,6 +55,17 @@ export default function DashboardOverviewPage() {
     }
   }
 
+  const connectedChannelNames = Array.from(
+    new Set(
+      socialAccounts.map((a) => {
+        if (a.platform === "gbp" || a.platform === "google_business") return "GBP";
+        if (a.platform === "twitter") return "Twitter / X";
+        if (a.platform === "linkedin") return "LinkedIn";
+        return a.platform.charAt(0).toUpperCase() + a.platform.slice(1);
+      })
+    )
+  );
+
   async function handleQuickPublish() {
     if (!user) return setAuthModalOpen(true);
     if (!quickPost.trim()) return addToast("error", "Write some text to publish");
@@ -54,9 +76,13 @@ export default function DashboardOverviewPage() {
         body: quickPost,
         platforms: [quickPlatform],
       });
+      const matchedAccount = socialAccounts.find(
+        (a) => a.platform === quickPlatform || (quickPlatform === "gbp" && a.platform === "google_business")
+      );
       const { postId } = await api.publish.now({
         contentDraftId: draft._id,
         platform: quickPlatform,
+        ...(matchedAccount ? { socialAccountId: matchedAccount.id } : {}),
       });
       const result = await api.publish.waitForResult(postId);
       if (result.status === "published") {
@@ -67,7 +93,7 @@ export default function DashboardOverviewPage() {
       }
       loadData();
     } catch (err) {
-      addToast("error", err.message || "Failed to publish");
+      addToast("error", err.response?.data?.error || err.message || "Failed to publish");
     } finally {
       setIsPublishing(false);
     }
@@ -138,8 +164,12 @@ export default function DashboardOverviewPage() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> 100% Synced
             </span>
           </div>
-          <div className="text-2xl font-bold text-white">{socialAccounts.length} / 2</div>
-          <p className="text-[11px] text-slate-500">Instagram, Facebook</p>
+          <div className="text-2xl font-bold text-white">{socialAccounts.length} Active</div>
+          <p className="text-[11px] text-slate-500">
+            {connectedChannelNames.length > 0
+              ? connectedChannelNames.join(", ")
+              : "Instagram, Facebook, X, LinkedIn, GBP"}
+          </p>
         </div>
       </div>
 
@@ -152,18 +182,17 @@ export default function DashboardOverviewPage() {
               <span>Quick Composer</span>
             </h3>
             <div className="flex items-center gap-1.5">
-              {[
-                { id: "instagram", icon: InstagramIcon, color: "text-pink-400" },
-                { id: "facebook", icon: FacebookIcon, color: "text-blue-500" },
-              ].map((p) => {
+              {QUICK_PLATFORMS.map((p) => {
                 const Icon = p.icon;
                 return (
                   <button
                     key={p.id}
+                    type="button"
+                    title={p.label}
                     onClick={() => setQuickPlatform(p.id)}
                     className={`p-1.5 rounded border transition ${
                       quickPlatform === p.id
-                        ? "bg-slate-800 border-indigo-500/50" + p.color
+                        ? `bg-slate-800 border-indigo-500/50 ${p.color}`
                         : "bg-slate-950 border-slate-800 text-slate-600 hover:text-slate-400"
                     }`}
                   >
