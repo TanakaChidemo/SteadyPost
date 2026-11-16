@@ -70,6 +70,14 @@ const APPROVAL_STEP_WORDS = {
   reject: "rejected",
 };
 
+// How each step reads in a post's history.
+const HISTORY_WORDS = {
+  submit: "submitted it for approval",
+  request_changes: "asked for changes",
+  approve: "approved it",
+  reject: "rejected it",
+};
+
 // Statuses an editor can pick a post back up from and resubmit.
 const REVISABLE = ["draft", "changes_requested", "rejected"];
 
@@ -105,6 +113,8 @@ export function ContentStudio() {
   const canSubmit = can(currentWorkspace, "post.submit");
   const canReview = can(currentWorkspace, "post.review");
   const canManageAccounts = can(currentWorkspace, "accounts.manage");
+  // The owner deletes any post; editors only their own drafts.
+  const canDeleteAny = can(currentWorkspace, "post.delete");
   // Editors send posts to the owner instead of publishing them.
   const sendsForApproval = canSubmit && !canPublish;
 
@@ -149,6 +159,8 @@ export function ContentStudio() {
   const [submitting, setSubmitting] = useState(false);
   // Owner: the comment typed while reviewing each post, by post id.
   const [reviewComments, setReviewComments] = useState({});
+  // Each open post history (the audit trail of who did what), by post id.
+  const [historyByPost, setHistoryByPost] = useState({});
 
   async function handleCheckGuardrails() {
     if (!body.trim()) {
@@ -226,30 +238,35 @@ export function ContentStudio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socialAccounts]);
 
+  // Opening a draft (a draft post of the business, F10) fills the editor.
   useEffect(() => {
     if (activeDraft) {
-      setTitle(activeDraft.title);
-      setBody(activeDraft.body);
-      const platforms =
-        activeDraft.platforms.length > 0
-          ? activeDraft.platforms.map(normalizePlatformId)
-          : ["instagram", "facebook"];
-      setSelectedAccountIds(
-        socialAccounts
-          .filter((a) => platforms.includes(normalizePlatformId(a.platform)))
-          .map((a) => a.id)
-      );
-      setMediaUrls(activeDraft.mediaUrls || []);
+      setTitle(activeDraft.content?.title || "");
+      setBody(activeDraft.content?.body || "");
+      const connected = (id) => socialAccounts.some((a) => a.id === id);
+      const targets = (activeDraft.targetAccountIds || []).filter(connected);
+      const accountIds =
+        targets.length > 0
+          ? targets
+          : activeDraft.socialAccountId && connected(activeDraft.socialAccountId)
+          ? [activeDraft.socialAccountId]
+          : socialAccounts
+              .filter((a) => normalizePlatformId(a.platform) === normalizePlatformId(activeDraft.channel))
+              .map((a) => a.id);
+      setSelectedAccountIds(accountIds);
+      setMediaUrls(activeDraft.content?.mediaUrls || []);
       setPreviewMediaIndex(0);
       setGuardrailAudit(activeDraft.aiMetadata?.guardrails || null);
-      if (platforms[0]) setPreviewPlatform(platforms[0]);
+      const firstAccount = socialAccounts.find((a) => a.id === accountIds[0]);
+      setPreviewPlatform(normalizePlatformId(firstAccount?.platform || activeDraft.channel));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDraft, socialAccounts]);
 
   async function loadDrafts() {
     try {
-      const items = await api.content.list();
+      // Drafts are the business's draft posts, shared with the team (F10).
+      const items = await api.posts.list({ status: "draft" });
       setDrafts(items);
       // Deliberately not auto-selecting a saved draft here — the compose box
       // should start blank on load. Users open a saved draft explicitly by
@@ -263,7 +280,8 @@ export function ContentStudio() {
     setLoadingPosts(true);
     try {
       const items = await api.posts.list();
-      setPipelinePosts(items);
+      // Drafts are listed under Saved Drafts, not in the pipeline.
+      setPipelinePosts(items.filter((p) => p.status !== "draft"));
     } catch (err) {
       // fallback
     } finally {
@@ -304,31 +322,65 @@ export function ContentStudio() {
 
     setLoading(true);
     try {
-      if (activeDraft?._id) {
-        const updated = await api.content.update(activeDraft._id, {
-          title,
-          body,
-          platforms: selectedPlatforms,
-          mediaUrls,
-        });
-        setActiveDraft(updated);
-        addToast("success", "Draft updated successfully!");
-      } else {
-        const created = await api.content.create({
-          title,
-          body,
-          platforms: selectedPlatforms,
-          mediaUrls,
-        });
-        setActiveDraft(created);
-        addToast("success", "New draft created!");
-      }
+      const wasNew = !activeDraft?.id;
+      await saveDraftPost();
+      addToast("success", wasNew ? "New draft created!" : "Draft updated successfully!");
       loadDrafts();
     } catch (err) {
-      addToast("error", err.message || "Failed to save draft");
+      addToast("error", err.response?.data?.error || err.message || "Failed to save draft");
     } finally {
       setLoading(false);
     }
+  }
+
+  const accountFor = (id) => socialAccounts.find((a) => a.id === id);
+  const isGbpAccount = (id) => normalizePlatformId(accountFor(id)?.platform) === "gbp";
+
+  // Saves the editor as a draft post of the business, meant for the selected
+  // accounts, and returns it.
+  async function saveDraftPost() {
+    const fields = {
+      title,
+      body,
+      mediaUrls,
+      targetAccountIds: selectedAccountIds,
+      channel: accountFor(selectedAccountIds[0])?.platform || previewPlatform,
+    };
+    const saved = activeDraft?.id ? await api.posts.update(activeDraft.id, fields) : await api.posts.create(fields);
+    setActiveDraft(saved);
+    return saved;
+  }
+
+  // A post goes to one account, so sending a draft makes one post per selected
+  // account: the draft itself becomes the first account's post and the others
+  // are copies. Each then gets its own approval and publish (F10).
+  async function splitDraftIntoPosts(draft, scheduledIso) {
+    const [firstId, ...otherIds] = selectedAccountIds;
+    const gbpFields = (id) => (isGbpAccount(id) ? { gbpOptions: gbpOptionsPayload } : {});
+    const first = await api.posts.update(draft.id, {
+      title,
+      body,
+      mediaUrls,
+      scheduledAt: scheduledIso,
+      socialAccountId: firstId,
+      channel: accountFor(firstId)?.platform,
+      targetAccountIds: [],
+      ...gbpFields(firstId),
+    });
+    const copies = await Promise.all(
+      otherIds.map((id) =>
+        api.posts.create({
+          title,
+          body,
+          mediaUrls,
+          scheduledAt: scheduledIso,
+          socialAccountId: id,
+          channel: accountFor(id)?.platform,
+          ...(isGbpAccount(id) ? { aiMetadata: { gbpOptions: gbpOptionsPayload } } : {}),
+        })
+      )
+    );
+    return [first, ...copies];
   }
 
   function getValidatedScheduledIso() {
@@ -360,34 +412,18 @@ export function ContentStudio() {
     setPublishing(true);
     setPublishStage(scheduledIso ? "Scheduling…" : "Submitting…");
     try {
-      let draftId = activeDraft?._id;
-      if (draftId) {
-        const updated = await api.content.update(draftId, {
-          title,
-          body,
-          platforms: selectedPlatforms,
-          mediaUrls,
-        });
-        setActiveDraft(updated);
-      } else {
-        const created = await api.content.create({
-          title,
-          body,
-          platforms: selectedPlatforms,
-          mediaUrls,
-        });
-        draftId = created._id;
-        setActiveDraft(created);
-      }
+      // One publish path: every post is a business post published through
+      // /posts/:id/publish-now, so it has approval history and metrics (F10).
+      const draft = await saveDraftPost();
+      const posts = await splitDraftIntoPosts(draft, scheduledIso);
+      setActiveDraft(null);
+      const items = await Promise.all(
+        posts.map(async (post) => {
+          const res = await api.posts.publishNow(post.id, scheduledIso ? { scheduledAt: scheduledIso } : {});
+          return { ...res, postId: res.postId || post.id, socialAccountId: post.socialAccountId };
+        })
+      );
 
-      const res = await api.publish.now({
-        contentDraftId: draftId,
-        socialAccountIds: selectedAccountIds,
-        ...(scheduledIso ? { scheduledAt: scheduledIso } : {}),
-        ...(Object.keys(gbpOptionsPayload).length > 0 ? { options: gbpOptionsPayload } : {}),
-      });
-
-      const items = Array.isArray(res.items) ? res.items : [res];
       const scheduledItems = items.filter((item) => item.status === "scheduled");
       const immediateItems = items.filter((item) => item.status !== "scheduled");
 
@@ -430,6 +466,7 @@ export function ContentStudio() {
         });
       }
 
+      handleCreateNew();
       loadDrafts();
       loadPosts();
     } catch (err) {
@@ -518,22 +555,10 @@ export function ContentStudio() {
         await api.posts.update(revisingPost.id, { title, body, mediaUrls, scheduledAt: scheduledIso });
         submitted = [await api.posts.submitApproval(revisingPost.id, { comment })];
       } else {
-        submitted = await Promise.all(
-          selectedAccountIds.map(async (accountId) => {
-            const account = socialAccounts.find((a) => a.id === accountId);
-            const isGbp = normalizePlatformId(account?.platform) === "gbp";
-            const post = await api.posts.create({
-              title,
-              body,
-              channel: account?.platform || previewPlatform,
-              socialAccountId: accountId,
-              mediaUrls,
-              ...(scheduledIso ? { scheduledAt: scheduledIso } : {}),
-              ...(isGbp ? { aiMetadata: { gbpOptions: gbpOptionsPayload } } : {}),
-            });
-            return api.posts.submitApproval(post.id, { comment });
-          })
-        );
+        const draft = await saveDraftPost();
+        const posts = await splitDraftIntoPosts(draft, scheduledIso);
+        setActiveDraft(null);
+        submitted = await Promise.all(posts.map((post) => api.posts.submitApproval(post.id, { comment })));
       }
 
       addToast(
@@ -545,6 +570,7 @@ export function ContentStudio() {
       const warning = submitted.find((p) => p.guardrailsWarning)?.guardrailsWarning;
       if (warning) addToast("info", warning);
       handleCreateNew();
+      loadDrafts();
       loadPosts();
     } catch (err) {
       addToast("error", err.response?.data?.error || err.message || "Could not send for approval");
@@ -608,6 +634,25 @@ export function ContentStudio() {
       addToast("error", err.response?.data?.error || err.message || "Could not update the post");
     } finally {
       setPostActionId(null);
+    }
+  }
+
+  // Shows or hides a post's approval history: who submitted, approved, asked
+  // for changes or rejected it, when, and what they said (F10 audit trail).
+  async function handleToggleHistory(postId) {
+    if (historyByPost[postId]) {
+      setHistoryByPost((prev) => {
+        const next = { ...prev };
+        delete next[postId];
+        return next;
+      });
+      return;
+    }
+    try {
+      const post = await api.posts.getById(postId);
+      setHistoryByPost((prev) => ({ ...prev, [postId]: post.approvalEvents || [] }));
+    } catch (err) {
+      addToast("error", err.response?.data?.error || "Could not load the history");
     }
   }
 
@@ -700,14 +745,14 @@ export function ContentStudio() {
 
   async function handleDeleteDraft(id) {
     try {
-      await api.content.delete(id);
+      await api.posts.delete(id);
       addToast("info", "Draft deleted");
-      if (activeDraft?._id === id) {
+      if (activeDraft?.id === id) {
         handleCreateNew();
       }
       loadDrafts();
     } catch (err) {
-      addToast("error", "Could not delete draft");
+      addToast("error", err.response?.data?.error || "Could not delete draft");
     }
   }
 
@@ -1479,22 +1524,27 @@ export function ContentStudio() {
               Saved Drafts ({drafts.length})
             </span>
             <div className="space-y-2 max-h-60 overflow-y-auto">
+              {drafts.length === 0 && (
+                <p className="text-[11px] text-slate-500">
+                  No drafts yet. Drafts saved by anyone on the team show up here.
+                </p>
+              )}
               {drafts.map((d) => (
                 <div
-                  key={d._id}
+                  key={d.id}
                   onClick={() => {
                     setRevisingPost(null);
                     setActiveDraft(d);
                   }}
                   className={`p-3 rounded-md border text-xs cursor-pointer transition flex items-center justify-between ${
-                    activeDraft?._id === d._id
+                    activeDraft?.id === d.id
                       ? "bg-indigo-950/40 border-indigo-500/50 text-white"
                       : "bg-slate-950 border-slate-800/80 text-slate-300 hover:border-slate-700"
                   }`}
                 >
                   <div className="truncate pr-2">
                     <div className="flex items-center gap-1.5">
-                      <span className="font-semibold truncate">{d.title}</span>
+                      <span className="font-semibold truncate">{d.content?.title || "Untitled post"}</span>
                       {d.aiMetadata?.guardrails && (
                         <span
                           className={`px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 ${
@@ -1512,13 +1562,16 @@ export function ContentStudio() {
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-slate-500 truncate mt-0.5">{d.body}</div>
+                    <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                      {d.authorName && <span className="text-slate-400">{d.authorName} · </span>}
+                      {d.content?.body}
+                    </div>
                   </div>
-                  {canWrite && (
+                  {(canDeleteAny || (canWrite && d.authorId === user.id)) && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDeleteDraft(d._id);
+                        handleDeleteDraft(d.id);
                       }}
                       className="text-slate-500 hover:text-rose-400 p-1"
                       title="Delete Draft"
@@ -1669,6 +1722,13 @@ export function ContentStudio() {
                             : "Publish Now"}
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleHistory(post.id)}
+                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-semibold transition"
+                      >
+                        {historyByPost[post.id] ? "Hide History" : "History"}
+                      </button>
                       {post.status === "published" && (
                         <button
                           type="button"
@@ -1689,6 +1749,23 @@ export function ContentStudio() {
                       <span className="text-slate-500"> · {APPROVAL_STEP_WORDS[post.lastApprovalEvent.action]}: </span>
                       &ldquo;{post.lastApprovalEvent.comment}&rdquo;
                     </div>
+                  )}
+
+                  {historyByPost[post.id] && (
+                    <ol className="p-2.5 rounded bg-slate-900/70 border border-slate-800 space-y-1.5 text-[11px]">
+                      {historyByPost[post.id].length === 0 ? (
+                        <li className="text-slate-500">No approval steps yet.</li>
+                      ) : (
+                        historyByPost[post.id].map((event) => (
+                          <li key={event.id} className="text-slate-300">
+                            <span className="text-slate-500">{new Date(event.timestamp).toLocaleString()} · </span>
+                            <span className="font-semibold text-slate-200">{event.actorName}</span>{" "}
+                            {HISTORY_WORDS[event.action] || event.action}
+                            {event.comment && <>: &ldquo;{event.comment}&rdquo;</>}
+                          </li>
+                        ))
+                      )}
+                    </ol>
                   )}
 
                   {canReview && post.status === "pending_approval" && (

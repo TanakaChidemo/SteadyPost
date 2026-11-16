@@ -112,7 +112,7 @@ export const useAppStore = create((set, get) => ({
 
       // Refresh channels and drafts for the selected workspace
       api.socialAccounts.list().then((accounts) => set({ socialAccounts: accounts })).catch(() => {});
-      api.content.list().then((drafts) => set({ drafts })).catch(() => {});
+      api.posts.list({ status: "draft" }).then((drafts) => set({ drafts })).catch(() => {});
 
       get().addToast("success", `Switched to ${currentWorkspace?.name || "workspace"}`);
     } catch (err) {
@@ -128,7 +128,7 @@ export const useAppStore = create((set, get) => ({
     setActiveWorkspaceId(activeWorkspaceId);
     await get().fetchWorkspaces();
     api.socialAccounts.list().then((accounts) => set({ socialAccounts: accounts })).catch(() => {});
-    api.content.list().then((drafts) => set({ drafts })).catch(() => {});
+    api.posts.list({ status: "draft" }).then((drafts) => set({ drafts })).catch(() => {});
     get().addToast("success", `Archived ${archived.name}`);
   },
 
