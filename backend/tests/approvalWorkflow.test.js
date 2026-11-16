@@ -87,6 +87,20 @@ describe("Approval workflow (F10)", () => {
     ]);
   });
 
+  it("lists each post with its latest note, so the owner and editor can read each other's comments", async () => {
+    const post = await newPost();
+    await act(people.editor, post, "submit-approval", { comment: "Can we run this Friday?" });
+    const forOwner = await request(app).get("/api/v1/posts").set(as(people.owner));
+    const submitted = forOwner.body.items.find((p) => p.id === post.id);
+    expect(submitted.lastApprovalEvent).toMatchObject({ action: "submit", comment: "Can we run this Friday?", actorName: "Flow editor" });
+
+    await act(people.owner, post, "request-changes", { comment: "Saturday is better" });
+    const forEditor = await request(app).get("/api/v1/posts").set(as(people.editor));
+    const returned = forEditor.body.items.find((p) => p.id === post.id);
+    expect(returned.status).toBe("changes_requested");
+    expect(returned.lastApprovalEvent).toMatchObject({ action: "request_changes", comment: "Saturday is better", actorName: "Rosie" });
+  });
+
   it("can reject a post, and the editor can resubmit it", async () => {
     const post = await newPost("pending_approval");
     expect((await act(people.owner, post, "reject", { comment: "Not this week" })).body.status).toBe("rejected");

@@ -1,3 +1,4 @@
+const { can } = require("../auth/permissions");
 const ContentDraft = require("../models/contentDraft.model");
 const postModel = require("../models/post.model");
 const guardrailsService = require("../services/guardrails/guardrailsService");
@@ -118,8 +119,8 @@ async function remove(req, res) {
     return res.status(204).send();
   }
 
-  // Gracefully handle legacy post_ ids
-  if (draftId.startsWith("post_")) {
+  // Gracefully handle legacy post_ ids. Deleting a post is owner-only (F10).
+  if (draftId.startsWith("post_") && can(req.membership?.role, "post.delete")) {
     try {
       const postRes = await postModel.Post.deleteOne({ _id: draftId, authorId: req.user.id });
       if (postRes.deletedCount > 0) {

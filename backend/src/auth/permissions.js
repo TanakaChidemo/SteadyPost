@@ -21,11 +21,14 @@ const PERMISSIONS = {
 
   "profile.update": WRITERS,
   "website.connect": WRITERS,
+  // Connect or disconnect the business's Facebook Page / Instagram account.
+  // That decides where posts go, so it sits with publishing: owner only.
+  "accounts.manage": OWNER,
   "ai.use": WRITERS,
   "opportunity.respond": WRITERS,
 
   "post.read": ALL,
-  "post.write": WRITERS, // create, edit, generate, repurpose
+  "post.write": WRITERS, // create, edit, generate, repurpose; Content Studio drafts
   "post.submit": WRITERS,
   "post.review": OWNER, // approve, request changes, reject
   "post.publish": OWNER,

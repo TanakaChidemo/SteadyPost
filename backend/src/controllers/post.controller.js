@@ -33,7 +33,13 @@ const createPostSchema = z.object({
 async function list(req, res) {
   const { status, campaignId } = req.query;
   const items = await postModel.findByWorkspaceId(req.workspaceId, { status, campaignId });
-  return res.json({ items });
+
+  // The latest approval step on each post, so the studio can show the editor's
+  // note to the owner and the owner's comment back to the editor (F10).
+  const latest = await approvalEventModel.latestByPostIds(items.map((p) => p.id));
+  const named = await withActorNames([...latest.values()]);
+  const byPost = new Map(named.map((e) => [e.postId, e]));
+  return res.json({ items: items.map((p) => ({ ...p, lastApprovalEvent: byPost.get(p.id) || null })) });
 }
 
 async function create(req, res) {

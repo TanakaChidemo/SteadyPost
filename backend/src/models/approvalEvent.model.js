@@ -32,4 +32,15 @@ async function create(data) {
   return withId(doc.toObject());
 }
 
-module.exports = { ApprovalEvent, findByPostId, create };
+/** The most recent event for each of `postIds`, as a Map of postId -> event. */
+async function latestByPostIds(postIds) {
+  if (postIds.length === 0) return new Map();
+  const docs = await ApprovalEvent.aggregate([
+    { $match: { postId: { $in: postIds } } },
+    { $sort: { timestamp: -1 } },
+    { $group: { _id: "$postId", event: { $first: "$$ROOT" } } },
+  ]);
+  return new Map(docs.map((d) => [d._id, withId(d.event)]));
+}
+
+module.exports = { ApprovalEvent, findByPostId, latestByPostIds, create };

@@ -7,6 +7,7 @@ const membershipModel = require("../src/models/membership.model");
 const userModel = require("../src/models/user.model");
 const postModel = require("../src/models/post.model");
 const ContentDraft = require("../src/models/contentDraft.model");
+const socialAccountModel = require("../src/models/socialAccount.model");
 const { ROLES, ACTIONS, can } = require("../src/auth/permissions");
 
 jest.setTimeout(60000);
@@ -42,9 +43,35 @@ describe("Permission matrix", () => {
     ["website.connect", "connect a website", () => ["put", "/website/connection", { url: "not a website" }]],
     ["ai.use", "generate posts with AI", () => ["post", "/ai/generate-variants", { idea: "Fresh bread", channels: ["facebook"] }]],
     ["opportunity.respond", "respond to an opportunity", () => ["post", "/opportunities/opp_missing/respond", { action: "skip" }]],
+    ["accounts.manage", "connect a social account", () => ["post", "/social-accounts", { platform: "facebook", displayName: "Matrix Page" }]],
+    ["accounts.manage", "connect a sandbox account", () => ["post", "/auth/connect-mock", { platform: "instagram" }]],
+    [
+      "accounts.manage",
+      "disconnect a social account",
+      async () => {
+        const account = await socialAccountModel.create({
+          workspaceId: workspace.id,
+          ownerId: people.owner.user.id,
+          platform: "facebook",
+          externalAccountId: `matrix_${Date.now()}_${Math.random()}`,
+          displayName: "Matrix Page",
+          linkedBy: people.owner.user.id,
+        });
+        return ["delete", `/social-accounts/${account.id}`];
+      },
+    ],
     ["post.read", "list posts", () => ["get", "/posts"]],
     ["post.write", "create a post", () => ["post", "/posts", { body: "New post", channel: "facebook" }]],
     ["post.write", "edit a post", async () => ["put", `/posts/${(await newPost()).id}`, { body: "Edited" }]],
+    ["post.write", "save a Content Studio draft", () => ["post", "/content", { title: "Quick", body: "Fresh bread", platforms: ["facebook"] }]],
+    [
+      "post.write",
+      "edit a Content Studio draft",
+      async (who) => {
+        const draft = await ContentDraft.create({ ownerId: who.user.id, workspaceId: workspace.id, title: "Quick", body: "Fresh bread", platforms: ["facebook"] });
+        return ["put", `/content/${draft._id}`, { body: "Fresher bread" }];
+      },
+    ],
     ["post.submit", "submit a post for approval", async () => ["post", `/posts/${(await newPost()).id}/submit-approval`]],
     ["post.review", "approve a post", async () => ["post", `/posts/${(await newPost("pending_approval")).id}/approve`]],
     ["post.review", "request changes", async () => ["post", `/posts/${(await newPost("pending_approval")).id}/request-changes`, { comment: "Shorter please" }]],
@@ -86,6 +113,7 @@ describe("Permission matrix", () => {
     await db.collection("businessprofiles").deleteMany({ workspaceId: workspace.id });
     await db.collection("notificationsettings").deleteMany({ workspaceId: workspace.id });
     await db.collection("contentdrafts").deleteMany({ ownerId: { $in: userIds } });
+    await db.collection("socialaccounts").deleteMany({ workspaceId: workspace.id });
     await db.collection("scheduledposts").deleteMany({ ownerId: { $in: userIds } });
     await workspaceModel.Workspace.deleteMany({ _id: workspace.id });
     await db.collection("users").deleteMany({ _id: { $in: userIds } });
