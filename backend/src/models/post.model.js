@@ -18,6 +18,10 @@ const postSchema = new mongoose.Schema(
     authorId: { type: String, required: true, ref: "User" },
     channel: { type: String, required: true },
     socialAccountId: { type: String, default: null, ref: "SocialAccount" },
+    // A draft can be meant for several accounts (the composer lets you pick
+    // more than one). When it's sent, it becomes one post per account, each
+    // with its own socialAccountId (F10).
+    targetAccountIds: { type: [String], default: [] },
     content: {
       title: { type: String, default: "Untitled Post" },
       body: { type: String, default: "" },

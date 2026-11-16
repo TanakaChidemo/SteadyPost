@@ -23,6 +23,7 @@ router.post("/:id/approve", requirePermission("post.review"), controller.approve
 router.post("/:id/request-changes", requirePermission("post.review"), controller.requestChanges);
 router.post("/:id/reject", requirePermission("post.review"), controller.reject);
 router.post("/:id/publish-now", requirePermission("post.publish"), controller.publishNow);
-router.delete("/:id", requirePermission("post.delete"), controller.deletePost);
+// Editors may delete their own drafts; the controller keeps every other delete owner-only (post.delete).
+router.delete("/:id", requirePermission("post.write"), controller.deletePost);
 
 module.exports = router;

@@ -1,6 +1,6 @@
 const { z } = require("zod");
 const postModel = require("../models/post.model");
-const contentDraftModel = require("../models/contentDraft.model");
+const { can } = require("../auth/permissions");
 const approvalEventModel = require("../models/approvalEvent.model");
 const predictionRecordModel = require("../models/predictionRecord.model");
 const postMetricsModel = require("../models/postMetrics.model");
@@ -22,6 +22,7 @@ const createPostSchema = z.object({
   body: z.string().min(1, "Post body is required"),
   channel: z.string().min(1, "Channel is required"),
   socialAccountId: z.string().optional().nullable(),
+  targetAccountIds: z.array(z.string()).max(25).optional(),
   campaignId: z.string().optional().nullable(),
   mediaUrls: z.array(z.string()).optional(),
   hashtags: z.array(z.string()).optional(),
@@ -35,11 +36,28 @@ async function list(req, res) {
   const items = await postModel.findByWorkspaceId(req.workspaceId, { status, campaignId });
 
   // The latest approval step on each post, so the studio can show the editor's
-  // note to the owner and the owner's comment back to the editor (F10).
+  // note to the owner and the owner's comment back to the editor, and who
+  // wrote each post, since drafts are shared across the business (F10).
   const latest = await approvalEventModel.latestByPostIds(items.map((p) => p.id));
   const named = await withActorNames([...latest.values()]);
   const byPost = new Map(named.map((e) => [e.postId, e]));
-  return res.json({ items: items.map((p) => ({ ...p, lastApprovalEvent: byPost.get(p.id) || null })) });
+  const authors = await namesFor(items.map((p) => p.authorId));
+  return res.json({
+    items: items.map((p) => ({
+      ...p,
+      authorName: authors.get(p.authorId) || "Former member",
+      lastApprovalEvent: byPost.get(p.id) || null,
+    })),
+  });
+}
+
+/** Checks every account a draft targets belongs to this business. Throws like validateAccountWorkspaceOwnership. */
+async function validateTargets(targetAccountIds, req) {
+  const ids = [...new Set(targetAccountIds)];
+  for (const socialAccountId of ids) {
+    await validateAccountWorkspaceOwnership({ socialAccountId, workspaceId: req.workspaceId, userId: req.user.id });
+  }
+  return ids;
 }
 
 async function create(req, res) {
@@ -53,6 +71,7 @@ async function create(req, res) {
     body,
     channel,
     socialAccountId = null,
+    targetAccountIds: requestedTargets = [],
     campaignId = null,
     mediaUrls = [],
     hashtags = [],
@@ -61,16 +80,18 @@ async function create(req, res) {
     aiMetadata = {},
   } = parsed.data;
 
-  if (socialAccountId) {
-    try {
+  let targetAccountIds;
+  try {
+    if (socialAccountId) {
       await validateAccountWorkspaceOwnership({
         socialAccountId,
         workspaceId: req.workspaceId,
         userId: req.user.id,
       });
-    } catch (err) {
-      return res.status(err.status || 403).json({ error: err.message });
     }
+    targetAccountIds = await validateTargets(requestedTargets, req);
+  } catch (err) {
+    return res.status(err.status || 403).json({ error: err.message });
   }
 
   const guardrails = await guardrailsService.auditDraft({
@@ -86,6 +107,7 @@ async function create(req, res) {
     authorId: req.user.id,
     channel,
     socialAccountId,
+    targetAccountIds,
     campaignId,
     content: { title, body, mediaUrls, hashtags },
     status: "draft",
@@ -101,11 +123,17 @@ async function create(req, res) {
   return res.status(201).json(post);
 }
 
+/** Display names for user ids, as a Map of id -> name (or email). */
+async function namesFor(userIds) {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (ids.length === 0) return new Map();
+  const users = await userModel.User.find({ _id: { $in: ids } }, { name: 1, email: 1 }).lean();
+  return new Map(users.map((u) => [u._id, u.name || u.email]));
+}
+
 /** Adds `actorName` to each approval event, for the post's history. */
 async function withActorNames(events) {
-  const ids = [...new Set(events.map((e) => e.actorId))];
-  const users = await userModel.User.find({ _id: { $in: ids } }, { name: 1, email: 1 }).lean();
-  const names = new Map(users.map((u) => [u._id, u.name || u.email]));
+  const names = await namesFor(events.map((e) => e.actorId));
   return events.map((e) => ({ ...e, actorName: names.get(e.actorId) || "Former member" }));
 }
 
@@ -157,6 +185,16 @@ async function update(req, res) {
       }
     }
     updates.socialAccountId = req.body.socialAccountId;
+  }
+  if (req.body.targetAccountIds !== undefined) {
+    if (!Array.isArray(req.body.targetAccountIds) || req.body.targetAccountIds.some((id) => typeof id !== "string")) {
+      return res.status(400).json({ error: "targetAccountIds must be a list of account ids" });
+    }
+    try {
+      updates.targetAccountIds = await validateTargets(req.body.targetAccountIds, req);
+    } catch (err) {
+      return res.status(err.status || 403).json({ error: err.message });
+    }
   }
   if (req.body.campaignId !== undefined) updates.campaignId = req.body.campaignId;
   if (req.body.scheduledAt !== undefined) {
@@ -415,6 +453,16 @@ async function deletePost(req, res) {
   const post = await postModel.findById(req.params.id);
   if (!post || post.workspaceId !== req.workspaceId) {
     return res.status(404).json({ error: "Post not found" });
+  }
+
+  // The owner can delete any post. Editors can delete their own drafts, since
+  // drafts are shared with the business now, but nothing else (F10).
+  const ownDraft = post.status === "draft" && post.authorId === req.user.id;
+  if (!can(req.membership.role, "post.delete") && !ownDraft) {
+    return res.status(403).json({
+      error: "You can delete your own drafts. Only the business owner can delete other posts.",
+      code: "FORBIDDEN",
+    });
   }
 
   await postModel.deleteOne({ _id: post.id });
@@ -737,14 +785,17 @@ async function batchCreate(req, res) {
 
       return {
         workspaceId: req.workspaceId,
-        ownerId: req.user.id,
+        authorId: req.user.id,
         channel: item.channel,
-        platforms: [item.channel],
-        title: item.title || `Post for ${item.channel}`,
-        body: item.body,
-        mediaUrls: item.mediaUrls || [],
-        hashtags: item.hashtags || [],
+        campaignId: item.campaignId || null,
+        content: {
+          title: item.title || `Post for ${item.channel}`,
+          body: item.body,
+          mediaUrls: item.mediaUrls || [],
+          hashtags: item.hashtags || [],
+        },
         status: "draft",
+        origin: "manual",
         aiMetadata: {
           ...(item.aiMetadata || {}),
           guardrails,
@@ -760,7 +811,8 @@ async function batchCreate(req, res) {
     })
   );
 
-  const createdDrafts = await contentDraftModel.createMany(itemsToInsert);
+  // Drafts live on the business's posts, so the whole team sees them (F10).
+  const createdDrafts = await postModel.createMany(itemsToInsert);
   return res.status(201).json({ items: createdDrafts });
 }
 

@@ -22,6 +22,9 @@ function normalizePlatform(platform) {
   return key;
 }
 
+// The studio and Overview now publish workspace Posts through
+// /posts/:id/publish-now (F10), so every post gets approval history and
+// metrics. This ContentDraft path is kept, owner-only, for API compatibility.
 async function publishNow(req, res) {
   const parsed = publishNowSchema.safeParse(req.body);
   if (!parsed.success) {
