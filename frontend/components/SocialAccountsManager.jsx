@@ -6,6 +6,7 @@ import { api } from "../lib/apiClient";
 import { loadFacebookSdk } from "../lib/facebookSdk";
 import { SetupWalkthroughModal } from "./SetupWalkthroughModal";
 import { SignInPrompt } from "./SignInPrompt";
+import { can } from "../lib/roles";
 import {
   InstagramIcon,
   FacebookIcon,
@@ -60,7 +61,10 @@ const AVAILABLE_CHANNELS = [
 ];
 
 export function SocialAccountsManager() {
-  const { authReady, token, user, setAuthModalOpen, socialAccounts, setSocialAccounts, addToast } = useAppStore();
+  const { authReady, token, user, currentWorkspace, setAuthModalOpen, socialAccounts, setSocialAccounts, addToast } =
+    useAppStore();
+  // Connecting accounts decides where posts go, so only the owner can (F10).
+  const manages = can(currentWorkspace, "accounts.manage");
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState("instagram");
@@ -82,14 +86,14 @@ export function SocialAccountsManager() {
   }, [authReady, token, user]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !manages) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("walkthrough") === "1") {
       setIsWalkthroughOpen(true);
     } else if (params.get("connect") === "1") {
       setIsConnectModalOpen(true);
     }
-  }, []);
+  }, [manages]);
 
   async function handleConnectWithMeta() {
     // Channels belong to a business profile, so never start Meta's login signed out.
@@ -235,10 +239,13 @@ export function SocialAccountsManager() {
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Connected Social Channels</h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Manage your authenticated social platforms, token permissions, and publishing routes.
+            {manages
+              ? "Manage your authenticated social platforms, token permissions, and publishing routes."
+              : "The accounts this business posts to. Only the business owner can connect or disconnect them."}
           </p>
         </div>
 
+        {manages && (
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsWalkthroughOpen(true)}
@@ -254,6 +261,7 @@ export function SocialAccountsManager() {
             <span>Connect New Channel</span>
           </button>
         </div>
+        )}
       </div>
 
       {/* Channel Cards Grid */}
@@ -306,12 +314,14 @@ export function SocialAccountsManager() {
                           <span className="font-semibold text-white truncate max-w-[70%]">
                             {account.displayName}
                           </span>
-                          <button
-                            onClick={() => handleDisconnect(account.id, account.displayName)}
-                            className="text-[11px] text-rose-400 hover:text-rose-300 font-semibold transition shrink-0"
-                          >
-                            Disconnect
-                          </button>
+                          {manages && (
+                            <button
+                              onClick={() => handleDisconnect(account.id, account.displayName)}
+                              className="text-[11px] text-rose-400 hover:text-rose-300 font-semibold transition shrink-0"
+                            >
+                              Disconnect
+                            </button>
+                          )}
                         </div>
                         <div className="flex items-center justify-between text-slate-300">
                           <span className="text-slate-500 font-medium">Status:</span>
@@ -329,15 +339,17 @@ export function SocialAccountsManager() {
                 <span className="text-[11px] text-slate-500">
                   {connectedAccounts.length > 0 ? "Ready for automated publish" : "Not linked yet"}
                 </span>
-                <button
-                  onClick={() => {
-                    setSelectedChannel(ch.platform);
-                    setIsConnectModalOpen(true);
-                  }}
-                  className="px-3 py-1.5 rounded bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-semibold transition"
-                >
-                  {connectedAccounts.length > 0 ? "Connect Another" : "Connect Channel"}
-                </button>
+                {manages && (
+                  <button
+                    onClick={() => {
+                      setSelectedChannel(ch.platform);
+                      setIsConnectModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-semibold transition"
+                  >
+                    {connectedAccounts.length > 0 ? "Connect Another" : "Connect Channel"}
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -345,7 +357,7 @@ export function SocialAccountsManager() {
       </div>
 
       {/* Connect Channel Modal */}
-      {isConnectModalOpen && (
+      {manages && isConnectModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80">
           <div className="relative w-full max-w-md p-6 rounded-lg bg-slate-900 border border-slate-800">
             <button

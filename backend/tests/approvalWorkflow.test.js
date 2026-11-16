@@ -7,6 +7,7 @@ const membershipModel = require("../src/models/membership.model");
 const userModel = require("../src/models/user.model");
 const postModel = require("../src/models/post.model");
 const approvalEventModel = require("../src/models/approvalEvent.model");
+const socialAccountModel = require("../src/models/socialAccount.model");
 const { applyApprovalAction, ApprovalError } = require("../src/services/approval.service");
 
 jest.setTimeout(30000);
@@ -57,6 +58,7 @@ describe("Approval workflow (F10)", () => {
     const ids = [workspace.id, otherWorkspace.id];
     await postModel.Post.deleteMany({ workspaceId: { $in: ids } });
     await approvalEventModel.ApprovalEvent.deleteMany({ workspaceId: { $in: ids } });
+    await socialAccountModel.SocialAccount.deleteMany({ workspaceId: { $in: ids } });
     await membershipModel.Membership.deleteMany({ workspaceId: { $in: ids } });
     await workspaceModel.Workspace.deleteMany({ _id: { $in: ids } });
     await mongoose.connection.collection("users").deleteMany({ _id: { $in: userIds } });
@@ -99,6 +101,35 @@ describe("Approval workflow (F10)", () => {
     const returned = forEditor.body.items.find((p) => p.id === post.id);
     expect(returned.status).toBe("changes_requested");
     expect(returned.lastApprovalEvent).toMatchObject({ action: "request_changes", comment: "Saturday is better", actorName: "Rosie" });
+  });
+
+  it("follows the Content Studio: editor posts to the owner's Page with a note, owner sends it back, editor fixes it, owner approves", async () => {
+    const page = await socialAccountModel.create({
+      workspaceId: workspace.id,
+      ownerId: people.owner.user.id,
+      platform: "facebook",
+      externalAccountId: `flow_page_${Date.now()}`,
+      displayName: "Rosie's Bakery Page",
+      linkedBy: people.owner.user.id,
+    });
+    const created = await request(app)
+      .post("/api/v1/posts")
+      .set(as(people.editor))
+      .send({ title: "Weekend", body: "Cakes all weekend", channel: "facebook", socialAccountId: page.id });
+    expect(created.status).toBe(201);
+    const post = created.body;
+    expect((await act(people.editor, post, "submit-approval", { comment: "Friday morning?" })).body.status).toBe("pending_approval");
+
+    // The editor can't publish it, even now it's submitted.
+    expect((await act(people.editor, post, "publish-now")).status).toBe(403);
+
+    await act(people.owner, post, "request-changes", { comment: "Say it's Saturday only" });
+    const edited = await request(app).put(`/api/v1/posts/${post.id}`).set(as(people.editor)).send({ body: "Cakes on Saturday" });
+    expect(edited.body.status).toBe("changes_requested");
+    expect((await act(people.editor, post, "submit-approval", { comment: "Fixed" })).body.status).toBe("pending_approval");
+    const approved = await act(people.owner, post, "approve");
+    expect(approved.body).toMatchObject({ status: "approved", socialAccountId: page.id });
+    expect(approved.body.content.body).toBe("Cakes on Saturday");
   });
 
   it("can reject a post, and the editor can resubmit it", async () => {

@@ -23,6 +23,7 @@ import {
   SpinnerIcon,
 } from "./Icons";
 import { AIModal } from "./AIModal";
+import { can } from "../lib/roles";
 
 const PLATFORMS = [
   { id: "instagram", label: "Instagram", icon: InstagramIcon, maxChars: 2200, color: "text-pink-400 border-pink-500/40 bg-pink-500/10" },
@@ -45,6 +46,7 @@ const PIPELINE_STATUS_STYLES = {
   pending_approval: "bg-amber-500/10 text-amber-300 border-amber-500/30",
   approved: "bg-indigo-500/10 text-indigo-300 border-indigo-500/30",
   changes_requested: "bg-orange-500/10 text-orange-300 border-orange-500/30",
+  rejected: "bg-rose-500/10 text-rose-300 border-rose-500/30",
   scheduled: "bg-sky-500/10 text-sky-300 border-sky-500/30",
   publishing: "bg-purple-500/10 text-purple-300 border-purple-500/30",
   published: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
@@ -59,6 +61,23 @@ function normalizePlatformId(platform) {
 }
 
 const MAX_MEDIA = 4;
+
+// How the latest approval step reads next to its comment in the pipeline.
+const APPROVAL_STEP_WORDS = {
+  submit: "note",
+  request_changes: "changes requested",
+  approve: "approved",
+  reject: "rejected",
+};
+
+// Statuses an editor can pick a post back up from and resubmit.
+const REVISABLE = ["draft", "changes_requested", "rejected"];
+
+/** An ISO date as the value a datetime-local input expects, in local time. */
+function toDateTimeLocal(iso) {
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
 
 function isVideoUrl(url) {
   return url.startsWith("data:video");
@@ -79,8 +98,15 @@ export function ContentStudio() {
     socialAccounts,
   } = useAppStore();
 
-  const workspaceRole = currentWorkspace?.role || "owner";
-  const isOwner = workspaceRole === "owner";
+  // What this person may do in the open business (F10), from the permissions
+  // the API returns with it. No permissions loaded means nothing is allowed.
+  const canWrite = can(currentWorkspace, "post.write");
+  const canPublish = can(currentWorkspace, "post.publish");
+  const canSubmit = can(currentWorkspace, "post.submit");
+  const canReview = can(currentWorkspace, "post.review");
+  const canManageAccounts = can(currentWorkspace, "accounts.manage");
+  // Editors send posts to the owner instead of publishing them.
+  const sendsForApproval = canSubmit && !canPublish;
 
   const [title, setTitle] = useState("New Social Campaign");
   const [body, setBody] = useState("");
@@ -115,6 +141,14 @@ export function ContentStudio() {
   const [postActionId, setPostActionId] = useState(null);
   const [metricsByPost, setMetricsByPost] = useState({});
   const [refreshingMetricsId, setRefreshingMetricsId] = useState(null);
+
+  // Editor: the note sent with a post, and the post being revised after the
+  // owner sent it back (changes requested or rejected).
+  const [approvalNote, setApprovalNote] = useState("");
+  const [revisingPost, setRevisingPost] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  // Owner: the comment typed while reviewing each post, by post id.
+  const [reviewComments, setReviewComments] = useState({});
 
   async function handleCheckGuardrails() {
     if (!body.trim()) {
@@ -238,6 +272,9 @@ export function ContentStudio() {
   }
 
   function toggleAccount(accountId) {
+    if (revisingPost) {
+      return addToast("info", "This post goes to one account. Cancel revising to start a new post.");
+    }
     const account = socialAccounts.find((a) => a.id === accountId);
     const normalizedAccPlatform = normalizePlatformId(account?.platform);
     if (selectedAccountIds.includes(accountId)) {
@@ -313,8 +350,8 @@ export function ContentStudio() {
     if (selectedAccountIds.length === 0) {
       return addToast("error", "Connect a social account first — see the Social Accounts page.");
     }
-    if (!isOwner) {
-      return addToast("error", "Only workspace owners can publish posts.");
+    if (!canPublish) {
+      return addToast("error", "Only the business owner can publish.");
     }
 
     const scheduledIso = getValidatedScheduledIso();
@@ -463,6 +500,121 @@ export function ContentStudio() {
     }
   }
 
+  // Editor: sends the post to the owner. A new post becomes one post per
+  // selected account; a post being revised is updated and resubmitted.
+  async function handleSubmitForApproval() {
+    if (!body.trim()) return addToast("error", "Write the post before sending it for approval");
+    if (!revisingPost && selectedAccountIds.length === 0) {
+      return addToast("error", "Choose at least one account to post to");
+    }
+    const scheduledIso = getValidatedScheduledIso();
+    if (scheduledIso === undefined) return;
+    const comment = approvalNote.trim();
+
+    setSubmitting(true);
+    try {
+      let submitted;
+      if (revisingPost) {
+        await api.posts.update(revisingPost.id, { title, body, mediaUrls, scheduledAt: scheduledIso });
+        submitted = [await api.posts.submitApproval(revisingPost.id, { comment })];
+      } else {
+        submitted = await Promise.all(
+          selectedAccountIds.map(async (accountId) => {
+            const account = socialAccounts.find((a) => a.id === accountId);
+            const isGbp = normalizePlatformId(account?.platform) === "gbp";
+            const post = await api.posts.create({
+              title,
+              body,
+              channel: account?.platform || previewPlatform,
+              socialAccountId: accountId,
+              mediaUrls,
+              ...(scheduledIso ? { scheduledAt: scheduledIso } : {}),
+              ...(isGbp ? { aiMetadata: { gbpOptions: gbpOptionsPayload } } : {}),
+            });
+            return api.posts.submitApproval(post.id, { comment });
+          })
+        );
+      }
+
+      addToast(
+        "success",
+        submitted.length === 1
+          ? "Sent to the owner for approval"
+          : `Sent ${submitted.length} posts to the owner for approval`
+      );
+      const warning = submitted.find((p) => p.guardrailsWarning)?.guardrailsWarning;
+      if (warning) addToast("info", warning);
+      handleCreateNew();
+      loadPosts();
+    } catch (err) {
+      addToast("error", err.response?.data?.error || err.message || "Could not send for approval");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Editor: loads a post the owner sent back into the editor to fix and resubmit.
+  function handleRevise(post) {
+    setActiveDraft(null);
+    setRevisingPost(post);
+    setTitle(post.content?.title || "");
+    setBody(post.content?.body || "");
+    setMediaUrls(post.content?.mediaUrls || []);
+    setPreviewMediaIndex(0);
+    if (post.socialAccountId) setSelectedAccountIds([post.socialAccountId]);
+    setPreviewPlatform(normalizePlatformId(post.channel));
+    if (post.scheduledAt) {
+      setScheduleMode("scheduled");
+      setScheduledAtInput(toDateTimeLocal(post.scheduledAt));
+    } else {
+      setScheduleMode("immediate");
+    }
+    setApprovalNote("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Owner: approve, send back for changes (comment needed), or reject.
+  async function handleReview(post, action) {
+    const comment = (reviewComments[post.id] || "").trim();
+    if (action === "request_changes" && !comment) {
+      return addToast("error", "Add a comment so the editor knows what to change");
+    }
+    const call = {
+      approve: api.posts.approve,
+      request_changes: api.posts.requestChanges,
+      reject: api.posts.reject,
+    }[action];
+
+    setPostActionId(post.id);
+    try {
+      const updated = await call(post.id, { comment });
+      addToast(
+        "success",
+        action === "approve"
+          ? updated.status === "scheduled"
+            ? "Approved. It will go out at its scheduled time."
+            : "Approved. It's ready to publish."
+          : action === "request_changes"
+          ? "Sent back to the editor with your comment"
+          : "Rejected"
+      );
+      setReviewComments((prev) => {
+        const next = { ...prev };
+        delete next[post.id];
+        return next;
+      });
+      loadPosts();
+    } catch (err) {
+      addToast("error", err.response?.data?.error || err.message || "Could not update the post");
+    } finally {
+      setPostActionId(null);
+    }
+  }
+
+  function accountName(post) {
+    return socialAccounts.find((a) => a.id === post.socialAccountId)?.displayName || normalizePlatformId(post.channel);
+  }
+
   async function handleToggleMetrics(postId) {
     if (metricsByPost[postId]) {
       setMetricsByPost((prev) => {
@@ -505,6 +657,8 @@ export function ContentStudio() {
 
   function handleCreateNew() {
     setActiveDraft(null);
+    setRevisingPost(null);
+    setApprovalNote("");
     setTitle(`Campaign #${drafts.length + 1}`);
     setBody("");
     setSelectedAccountIds(socialAccounts.map((a) => a.id));
@@ -565,6 +719,7 @@ export function ContentStudio() {
     : previewTabs[0];
 
   const approvedCount = pipelinePosts.filter((p) => p.status === "approved").length;
+  const pendingCount = pipelinePosts.filter((p) => p.status === "pending_approval").length;
   const filteredPipelinePosts =
     pipelineFilter === "all"
       ? pipelinePosts
@@ -594,26 +749,30 @@ export function ContentStudio() {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
-            onClick={handleCreateNew}
-            className="flex items-center gap-1.5 px-3 py-2 rounded bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-semibold text-slate-200 transition"
-          >
-            <PlusIcon className="w-4 h-4" />
-            <span>New Draft</span>
-          </button>
+          {canWrite && (
+            <button
+              onClick={handleCreateNew}
+              className="flex items-center gap-1.5 px-3 py-2 rounded bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-semibold text-slate-200 transition"
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span>New Draft</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => setAiModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border border-purple-500/40 text-purple-200 hover:border-purple-400 text-xs font-semibold transition"
-          >
-            <SparklesIcon className="w-4 h-4 text-purple-400" />
-            <span>Write with AI</span>
-          </button>
+          {canWrite && (
+            <button
+              onClick={() => setAiModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border border-purple-500/40 text-purple-200 hover:border-purple-400 text-xs font-semibold transition"
+            >
+              <SparklesIcon className="w-4 h-4 text-purple-400" />
+              <span>Write with AI</span>
+            </button>
+          )}
 
+          {canPublish ? (
           <button
             onClick={handlePublishNow}
-            disabled={loading || publishing || !isOwner}
-            title={!isOwner ? "Only workspace owners can publish directly" : undefined}
+            disabled={loading || publishing}
             className="flex items-center gap-1.5 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {publishing ? (
@@ -633,13 +792,27 @@ export function ContentStudio() {
               </>
             )}
           </button>
+          ) : sendsForApproval ? (
+            <button
+              onClick={handleSubmitForApproval}
+              disabled={loading || submitting}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {submitting ? <SpinnerIcon className="w-4 h-4 animate-spin" /> : <SendIcon className="w-4 h-4" />}
+              <span>{submitting ? "Sending…" : revisingPost ? "Resubmit for Approval" : "Submit for Approval"}</span>
+            </button>
+          ) : (
+            <span className="px-3 py-2 rounded-md bg-slate-900 border border-slate-800 text-xs text-slate-400">
+              View only: viewers can see posts but not change them
+            </span>
+          )}
         </div>
       </div>
 
       {/* Main Studio Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Editor (7 cols) */}
-        <div className="lg:col-span-7 space-y-5">
+        {/* Left Column: Editor (7 cols). Read-only for viewers. */}
+        <fieldset disabled={!canWrite} className="lg:col-span-7 space-y-5 min-w-0">
           {/* Target Accounts Bar — one toggle per connected account, since a
               user can have more than one Page per platform */}
           <div className="p-4 rounded-lg bg-slate-900/80 border border-slate-800 space-y-2.5">
@@ -647,20 +820,28 @@ export function ContentStudio() {
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                 Publish Destinations
               </span>
-              <Link
-                href="/dashboard/accounts?connect=1"
-                className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300"
-              >
-                + Connect Channel
-              </Link>
+              {canManageAccounts && (
+                <Link
+                  href="/dashboard/accounts?connect=1"
+                  className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300"
+                >
+                  + Connect Channel
+                </Link>
+              )}
             </div>
             {socialAccounts.length === 0 ? (
               <p className="text-xs text-slate-500">
                 No accounts connected yet.{" "}
-                <Link href="/dashboard/accounts?walkthrough=1" className="text-indigo-400 hover:text-indigo-300">
-                  Open Setup Walkthrough (#08, F27)
-                </Link>
-                .
+                {canManageAccounts ? (
+                  <>
+                    <Link href="/dashboard/accounts?walkthrough=1" className="text-indigo-400 hover:text-indigo-300">
+                      Open Setup Walkthrough (#08, F27)
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  "Ask the business owner to connect one."
+                )}
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -692,6 +873,23 @@ export function ContentStudio() {
 
           {/* Editor Body */}
           <div className="p-5 rounded-lg bg-slate-900/80 border border-slate-800 space-y-4">
+            {revisingPost && (
+              <div className="p-3 rounded-md bg-orange-500/10 border border-orange-500/30 text-xs text-orange-200 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">
+                    Revising &ldquo;{revisingPost.content?.title || "Untitled post"}&rdquo; for {accountName(revisingPost)}
+                  </span>
+                  <button type="button" onClick={handleCreateNew} className="text-orange-300 hover:text-white underline shrink-0">
+                    Cancel
+                  </button>
+                </div>
+                {revisingPost.lastApprovalEvent?.comment && (
+                  <p className="text-orange-100/90">
+                    {revisingPost.lastApprovalEvent.actorName}: &ldquo;{revisingPost.lastApprovalEvent.comment}&rdquo;
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Campaign Title</label>
               <input
@@ -951,21 +1149,54 @@ export function ContentStudio() {
               )}
             </div>
 
+            {/* Editor: a note to the owner, sent with the post */}
+            {sendsForApproval && (
+              <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                <label htmlFor="approval-note" className="block text-xs font-medium text-slate-400">
+                  Note to the owner (optional)
+                </label>
+                <textarea
+                  id="approval-note"
+                  rows={2}
+                  maxLength={1000}
+                  value={approvalNote}
+                  onChange={(e) => setApprovalNote(e.target.value)}
+                  placeholder="e.g. Could this go out Friday morning? I used the new menu photo."
+                  className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+                <p className="text-[10px] text-slate-500">
+                  The owner approves it, rejects it, or sends it back with a comment. Nothing is published until they approve.
+                </p>
+              </div>
+            )}
+
             {/* Bottom Editor Actions */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSaveDraft}
-                  disabled={loading || publishing}
-                  className="px-4 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {loading ? "Saving…" : "Save as Draft"}
-                </button>
+                {!revisingPost && (
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    disabled={loading || publishing}
+                    className="px-4 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {loading ? "Saving…" : "Save as Draft"}
+                  </button>
+                )}
+                {sendsForApproval && (
+                  <button
+                    type="button"
+                    onClick={handleSubmitForApproval}
+                    disabled={loading || submitting}
+                    className="px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {submitting ? "Sending…" : revisingPost ? "Resubmit for Approval" : "Submit for Approval"}
+                  </button>
+                )}
               </div>
             </div>
           </div>
-        </div>
+        </fieldset>
 
         {/* Right Column: Live Feed Previews (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
@@ -1251,7 +1482,10 @@ export function ContentStudio() {
               {drafts.map((d) => (
                 <div
                   key={d._id}
-                  onClick={() => setActiveDraft(d)}
+                  onClick={() => {
+                    setRevisingPost(null);
+                    setActiveDraft(d);
+                  }}
                   className={`p-3 rounded-md border text-xs cursor-pointer transition flex items-center justify-between ${
                     activeDraft?._id === d._id
                       ? "bg-indigo-950/40 border-indigo-500/50 text-white"
@@ -1280,16 +1514,18 @@ export function ContentStudio() {
                     </div>
                     <div className="text-[10px] text-slate-500 truncate mt-0.5">{d.body}</div>
                   </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteDraft(d._id);
-                    }}
-                    className="text-slate-500 hover:text-rose-400 p-1"
-                    title="Delete Draft"
-                  >
-                    <TrashIcon className="w-3.5 h-3.5" />
-                  </button>
+                  {canWrite && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteDraft(d._id);
+                      }}
+                      className="text-slate-500 hover:text-rose-400 p-1"
+                      title="Delete Draft"
+                    >
+                      <TrashIcon className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -1311,7 +1547,7 @@ export function ContentStudio() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {isOwner && approvedCount > 0 && (
+            {canPublish && approvedCount > 0 && (
               <button
                 type="button"
                 onClick={handlePublishAllApproved}
@@ -1342,6 +1578,9 @@ export function ContentStudio() {
         <div className="flex flex-wrap items-center gap-1.5">
           {[
             { id: "all", label: "All" },
+            { id: "pending_approval", label: `Needs approval${pendingCount ? ` (${pendingCount})` : ""}` },
+            { id: "changes_requested", label: "Changes requested" },
+            { id: "rejected", label: "Rejected" },
             { id: "approved", label: "Approved" },
             { id: "scheduled", label: "Scheduled" },
             { id: "published", label: "Published" },
@@ -1396,17 +1635,27 @@ export function ContentStudio() {
                           <span
                             className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase ${statusStyle}`}
                           >
-                            {post.status.replace("_", " ")}
+                            {post.status.replace(/_/g, " ")}
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                          <span className="text-slate-500">{accountName(post)} · </span>
                           {post.content?.body}
                         </p>
                       </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                      {(post.status === "approved" || post.status === "failed") && isOwner && (
+                      {sendsForApproval && REVISABLE.includes(post.status) && (
+                        <button
+                          type="button"
+                          onClick={() => handleRevise(post)}
+                          className="px-2.5 py-1 rounded bg-orange-600/20 hover:bg-orange-600/30 border border-orange-500/40 text-orange-200 font-semibold transition"
+                        >
+                          {post.status === "draft" ? "Edit & Submit" : "Revise"}
+                        </button>
+                      )}
+                      {(post.status === "approved" || post.status === "failed") && canPublish && (
                         <button
                           type="button"
                           onClick={() => handlePublishPipelinePost(post)}
@@ -1433,6 +1682,59 @@ export function ContentStudio() {
                       )}
                     </div>
                   </div>
+
+                  {post.lastApprovalEvent?.comment && (
+                    <div className="p-2 rounded bg-slate-900/70 border border-slate-800 text-[11px] text-slate-300">
+                      <span className="font-semibold text-slate-200">{post.lastApprovalEvent.actorName}</span>
+                      <span className="text-slate-500"> · {APPROVAL_STEP_WORDS[post.lastApprovalEvent.action]}: </span>
+                      &ldquo;{post.lastApprovalEvent.comment}&rdquo;
+                    </div>
+                  )}
+
+                  {canReview && post.status === "pending_approval" && (
+                    <div className="p-2.5 rounded bg-amber-500/5 border border-amber-500/20 space-y-2">
+                      {post.aiMetadata?.guardrails && !post.aiMetadata.guardrails.passed && (
+                        <p className="text-[11px] text-rose-300">
+                          ⚠️ {post.aiMetadata.guardrails.violations?.length || 1} brand guardrail issue(s) flagged
+                        </p>
+                      )}
+                      <textarea
+                        rows={2}
+                        maxLength={1000}
+                        aria-label="Comment for the editor"
+                        value={reviewComments[post.id] || ""}
+                        onChange={(e) => setReviewComments((prev) => ({ ...prev, [post.id]: e.target.value }))}
+                        placeholder="Comment for the editor (needed to request changes)"
+                        className="w-full px-2.5 py-1.5 rounded bg-slate-950 border border-slate-800 text-[11px] text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                      />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleReview(post, "approve")}
+                          disabled={isBusy}
+                          className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition disabled:opacity-60"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleReview(post, "request_changes")}
+                          disabled={isBusy}
+                          className="px-2.5 py-1 rounded bg-orange-600/20 hover:bg-orange-600/30 border border-orange-500/40 text-orange-200 font-semibold transition disabled:opacity-60"
+                        >
+                          Request changes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleReview(post, "reject")}
+                          disabled={isBusy}
+                          className="px-2.5 py-1 rounded bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-200 font-semibold transition disabled:opacity-60"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {post.scheduledAt && (
                     <div className="text-[11px] text-sky-300 flex items-center gap-1.5">
