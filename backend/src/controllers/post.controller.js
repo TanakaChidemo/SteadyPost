@@ -13,6 +13,7 @@ const guardrailsService = require("../services/guardrails/guardrailsService");
 const approvalService = require("../services/approval.service");
 const userModel = require("../models/user.model");
 const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
+const { isGbpAccount, isGbpListingVerified, getGbpUnverifiedError, validateGbpOptions } = require("../utils/gbpValidation");
 
 const ALLOWED_CHANNELS = ["twitter", "linkedin", "instagram", "facebook", "gbp", "google_business"];
 const MAX_IDEA_LENGTH = 5000;
@@ -29,6 +30,7 @@ const createPostSchema = z.object({
   scheduledAt: z.string().datetime().optional().nullable(),
   origin: z.enum(["manual", "campaign", "opportunity"]).optional(),
   aiMetadata: z.record(z.any()).optional(),
+  gbpOptions: z.record(z.any()).optional(),
 });
 
 async function list(req, res) {
@@ -102,6 +104,14 @@ async function create(req, res) {
     workspaceId: req.workspaceId,
   });
 
+  const effectiveGbpOptions = aiMetadata.gbpOptions || req.body.gbpOptions;
+  if (effectiveGbpOptions) {
+    const gbpErr = validateGbpOptions(effectiveGbpOptions, { requireDates: false });
+    if (gbpErr) {
+      return res.status(400).json({ error: gbpErr });
+    }
+  }
+
   const post = await postModel.create({
     workspaceId: req.workspaceId,
     authorId: req.user.id,
@@ -115,6 +125,7 @@ async function create(req, res) {
     origin,
     aiMetadata: {
       ...aiMetadata,
+      ...(effectiveGbpOptions ? { gbpOptions: effectiveGbpOptions } : {}),
       guardrails,
     },
     versions: [{ body, editedAt: new Date(), editedBy: req.user.id }],
@@ -238,11 +249,20 @@ async function update(req, res) {
 
   // Google Business Profile options (topic, call to action) for a post sent
   // from a studio draft, used when it's published or queued on approval.
-  if (req.body.gbpOptions !== undefined) {
-    if (req.body.gbpOptions !== null && typeof req.body.gbpOptions !== "object") {
+  const incomingGbp =
+    req.body.aiMetadata?.gbpOptions !== undefined
+      ? req.body.aiMetadata.gbpOptions
+      : req.body.gbpOptions;
+  if (incomingGbp !== undefined) {
+    if (incomingGbp !== null && typeof incomingGbp !== "object") {
       return res.status(400).json({ error: "gbpOptions must be an object" });
     }
-    updates.aiMetadata = { ...(updates.aiMetadata || post.aiMetadata || {}), gbpOptions: req.body.gbpOptions || {} };
+    const isDraft = post.status === "draft";
+    const gbpErr = validateGbpOptions(incomingGbp, { requireDates: !isDraft });
+    if (gbpErr) {
+      return res.status(400).json({ error: gbpErr });
+    }
+    updates.aiMetadata = { ...(updates.aiMetadata || post.aiMetadata || {}), gbpOptions: incomingGbp || {} };
   }
 
   // An editor changing a post that's waiting for, or has, the owner's approval
@@ -311,13 +331,22 @@ async function publishNow(req, res) {
   const { scheduledAt, socialAccountId, options = {} } = parsed.data;
   const effectiveAccountId = socialAccountId !== undefined ? socialAccountId : post.socialAccountId || null;
 
+  const effectiveOptions = { ...(post.aiMetadata?.gbpOptions || {}), ...options };
+  const gbpErr = validateGbpOptions(effectiveOptions, { requireDates: true });
+  if (gbpErr) {
+    return res.status(400).json({ error: gbpErr });
+  }
+
   if (effectiveAccountId) {
     try {
-      await validateAccountWorkspaceOwnership({
+      const validatedAcc = await validateAccountWorkspaceOwnership({
         socialAccountId: effectiveAccountId,
         workspaceId: req.workspaceId,
         userId: req.user.id,
       });
+      if (isGbpAccount(validatedAcc || post.channel) && !isGbpListingVerified(validatedAcc)) {
+        return res.status(400).json(getGbpUnverifiedError());
+      }
     } catch (err) {
       return res.status(err.status || 403).json({ error: err.message });
     }
@@ -411,16 +440,24 @@ async function publishApproved(req, res) {
   for (const post of postsToPublish) {
     if (post.socialAccountId) {
       try {
-        await validateAccountWorkspaceOwnership({
+        const validatedAcc = await validateAccountWorkspaceOwnership({
           socialAccountId: post.socialAccountId,
           workspaceId: req.workspaceId,
           userId: req.user.id,
         });
+        if (isGbpAccount(validatedAcc || post.channel) && !isGbpListingVerified(validatedAcc)) {
+          return res.status(400).json(getGbpUnverifiedError(post.id));
+        }
       } catch (err) {
         return res.status(err.status || 403).json({
           error: `Post ${post.id}: ${err.message}`,
         });
       }
+    }
+
+    const gbpErr = validateGbpOptions(post.aiMetadata?.gbpOptions, { requireDates: true });
+    if (gbpErr) {
+      return res.status(400).json({ error: `Post ${post.id}: ${gbpErr}` });
     }
 
     const delay = post.scheduledAt ? Math.max(0, new Date(post.scheduledAt).getTime() - Date.now()) : 0;
@@ -436,7 +473,9 @@ async function publishApproved(req, res) {
         content: post.content?.body || "",
         mediaUrls: post.content?.mediaUrls || [],
         hashtags: post.content?.hashtags || [],
-        options: post.aiMetadata?.gbpOptions || post.aiMetadata?.options || {},
+        options: {
+          ...(post.aiMetadata?.gbpOptions || post.aiMetadata?.options || {}),
+        },
       },
       { delay }
     );

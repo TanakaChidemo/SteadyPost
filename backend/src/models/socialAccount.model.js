@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const { newId, withId } = require("../utils/id");
+const { resolveAccountVerification, isGbpListingVerified } = require("../utils/gbpValidation");
 
 const socialAccountSchema = new mongoose.Schema(
   {
@@ -20,14 +21,25 @@ const socialAccountSchema = new mongoose.Schema(
 
 const SocialAccount = mongoose.models.SocialAccount || mongoose.model("SocialAccount", socialAccountSchema);
 
+function formatAccount(doc) {
+  if (!doc) return null;
+  const item = withId(doc);
+  // Expose isVerified aliased to isGbpListingVerified / verified for any consumers
+  if (item.verified !== undefined && item.isVerified === undefined) {
+    item.isVerified = isGbpListingVerified(item);
+  }
+  return item;
+}
+
 async function list(filter) {
   const query = typeof filter === "string" ? { $or: [{ workspaceId: filter }, { ownerId: filter }] } : filter;
   const docs = await SocialAccount.find(query).sort({ linkedAt: -1 }).lean();
-  return docs.map(withId);
+  return docs.map(formatAccount);
 }
 
 async function findById(id) {
-  return withId(await SocialAccount.findById(id).lean());
+  const doc = await SocialAccount.findById(id).lean();
+  return formatAccount(doc);
 }
 
 async function create({
@@ -39,8 +51,15 @@ async function create({
   accessToken,
   verificationState,
   verified,
+  isVerified,
   linkedBy,
 }) {
+  const resolved = resolveAccountVerification(
+    platform,
+    verificationState,
+    typeof verified === "boolean" ? verified : isVerified
+  );
+
   const doc = await SocialAccount.create({
     workspaceId: workspaceId || null,
     ownerId: ownerId || null,
@@ -48,11 +67,11 @@ async function create({
     externalAccountId,
     displayName,
     accessToken: accessToken || null,
-    verificationState: verificationState || null,
-    verified: typeof verified === "boolean" ? verified : null,
+    verificationState: resolved.verificationState,
+    verified: resolved.verified,
     linkedBy: linkedBy || null,
   });
-  return withId(doc.toObject());
+  return formatAccount(doc.toObject());
 }
 
 async function deleteOne(filter) {

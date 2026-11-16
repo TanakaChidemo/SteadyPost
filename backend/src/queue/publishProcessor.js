@@ -5,6 +5,7 @@ const postMetricsModel = require("../models/postMetrics.model");
 const socialAccountModel = require("../models/socialAccount.model");
 const { getAdapter } = require("../services/publishers/adapterRegistry");
 const { enqueueMetricsJob, getMetricsQueue } = require("./jobQueue");
+const { isGbpListingVerified } = require("../utils/gbpValidation");
 
 function normalizePlatformKey(platform) {
   const key = String(platform || "").toLowerCase().trim();
@@ -35,6 +36,9 @@ async function resolveAccountCredentials({ socialAccountId, workspaceId, platfor
         workspaceId: account.workspaceId,
         ownerId: account.ownerId,
         platform: account.platform,
+        verified: isGbpListingVerified(account),
+        isVerified: isGbpListingVerified(account),
+        verificationState: account.verificationState || (isGbpListingVerified(account) ? "VERIFIED" : "UNVERIFIED"),
       };
     }
   }
@@ -54,6 +58,9 @@ async function resolveAccountCredentials({ socialAccountId, workspaceId, platfor
         workspaceId: matching.workspaceId,
         ownerId: matching.ownerId,
         platform: matching.platform,
+        verified: isGbpListingVerified(matching),
+        isVerified: isGbpListingVerified(matching),
+        verificationState: matching.verificationState || (isGbpListingVerified(matching) ? "VERIFIED" : "UNVERIFIED"),
       };
     }
   }
