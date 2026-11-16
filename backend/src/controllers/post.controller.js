@@ -236,6 +236,15 @@ async function update(req, res) {
     };
   }
 
+  // Google Business Profile options (topic, call to action) for a post sent
+  // from a studio draft, used when it's published or queued on approval.
+  if (req.body.gbpOptions !== undefined) {
+    if (req.body.gbpOptions !== null && typeof req.body.gbpOptions !== "object") {
+      return res.status(400).json({ error: "gbpOptions must be an object" });
+    }
+    updates.aiMetadata = { ...(updates.aiMetadata || post.aiMetadata || {}), gbpOptions: req.body.gbpOptions || {} };
+  }
+
   // An editor changing a post that's waiting for, or has, the owner's approval
   // sends it back to draft: the owner only ever approves what they've seen.
   const needsReapproval = ["pending_approval", "approved"].includes(post.status);

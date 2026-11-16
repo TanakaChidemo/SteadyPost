@@ -125,6 +125,14 @@ describe("Drafts on posts (F10)", () => {
     ]);
   });
 
+  it("keeps Google Business options set when a draft is sent to a GBP account", async () => {
+    const draft = (await saveDraft(people.editor)).body;
+    const gbpOptions = { topicType: "OFFER", callToAction: { actionType: "ORDER", url: "https://example.com/cakes" } };
+    const res = await request(app).put(`/api/v1/posts/${draft.id}`).set(as(people.editor)).send({ body: "Cake offer", gbpOptions });
+    expect(res.body.aiMetadata.gbpOptions).toEqual(gbpOptions);
+    expect(res.body.aiMetadata.guardrails).toBeDefined();
+  });
+
   describe("deleting drafts", () => {
     const del = (who, post) => request(app).delete(`/api/v1/posts/${post.id}`).set(as(who));
 
