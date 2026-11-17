@@ -1,17 +1,21 @@
 const express = require("express");
 const controller = require("../controllers/workspace.controller");
 const team = require("../controllers/team.controller");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, optionalAuth } = require("../middleware/auth");
 const { resolveWorkspace } = require("../middleware/workspaceContext");
 const { requirePermission } = require("../middleware/requirePermission");
 
 const router = express.Router();
+
+// An invite link shows whose team it's for before you sign in, so a new
+// invitee knows what they're signing up to (F10).
+router.get("/invitations/:token", optionalAuth, team.previewInvitation);
+
 router.use(requireAuth);
 
 router.get("/", controller.list);
 router.post("/", controller.create);
 router.post("/switch/:id", controller.switchWorkspace);
-router.get("/invitations/:token", team.previewInvitation);
 router.post("/invitations/accept", team.acceptInvitation);
 
 router.get("/current", resolveWorkspace, (req, res) => {

@@ -82,7 +82,8 @@ async function previewInvitation(req, res) {
   }
 
   const owner = await userModel.findById(workspace.ownerId);
-  const membership = await membershipModel.findByUserAndWorkspace(req.user.id, workspace.id);
+  // Signed out, there's no one to check yet.
+  const membership = req.user && (await membershipModel.findByUserAndWorkspace(req.user.id, workspace.id));
   return res.json({
     workspaceName: workspace.name,
     ownerName: owner?.name || "",

@@ -34,8 +34,12 @@ function Invitation() {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
 
+  // Signed out, the preview still says whose team it is; it's checked again
+  // after sign-in to see if you're already on it.
   useEffect(() => {
-    if (!authReady || !user || !token) return;
+    if (!authReady || !token) return;
+    setError("");
+    setInvite(null);
     api.workspaces
       .previewInvite(token)
       .then(setInvite)
@@ -63,11 +67,23 @@ function Invitation() {
   if (!token) return <Problem text="This invite link is incomplete. Ask for a new one." />;
   if (!authReady) return <Loading />;
 
+  if (error) return <Problem text={error} />;
+
   if (!user) {
+    const inviter = invite?.ownerName || "The owner";
+    const invitedAs = invite && ROLE_INFO[invite.role];
     return (
       <>
-        <h1 className="text-lg font-bold text-white">You&apos;ve been invited to a team</h1>
-        <p className="text-xs text-slate-400">Sign in, or create a free account, to see the invite and join.</p>
+        <h1 className="text-lg font-bold text-white">
+          {invite ? `Join ${invite.workspaceName}` : "You've been invited to a team"}
+        </h1>
+        {invitedAs && (
+          <p className="text-sm text-slate-300">
+            {inviter} invited you as {invitedAs.label === "Editor" ? "an" : "a"}{" "}
+            <span className="font-semibold">{invitedAs.label}</span>.
+          </p>
+        )}
+        <p className="text-xs text-slate-400">Sign in, or create a free account, to join.</p>
         <button
           onClick={() => setAuthModalOpen(true)}
           className="w-full px-4 py-2.5 rounded-lg gradient-brand text-sm font-semibold text-white"
@@ -78,7 +94,6 @@ function Invitation() {
     );
   }
 
-  if (error) return <Problem text={error} />;
   if (!invite) return <Loading />;
 
   const role = ROLE_INFO[invite.role];

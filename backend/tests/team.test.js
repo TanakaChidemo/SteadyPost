@@ -77,6 +77,21 @@ describe("Teams and invite links", () => {
     expect(list.find((w) => w.role === "editor").permissions).not.toContain("post.publish");
   });
 
+  it("shows a signed-out invitee whose team the invite is for, without accepting it", async () => {
+    const link = await inviteLink("viewer", "Newcomer");
+    const url = `/api/v1/workspaces/invitations/${encodeURIComponent(tokenOf(link))}`;
+
+    const preview = await request(app).get(url);
+    expect(preview.status).toBe(200);
+    expect(preview.body).toEqual({ workspaceName: "Rosie's Business", ownerName: "Rosie", role: "viewer", alreadyMember: false });
+
+    // A token that's sent must still be good, so the app refreshes it.
+    expect((await request(app).get(url).set("Authorization", "Bearer not-a-token")).status).toBe(401);
+    expect((await request(app).get("/api/v1/workspaces/invitations/made-up")).status).toBe(404);
+    // Accepting still needs you signed in.
+    expect((await request(app).post("/api/v1/workspaces/invitations/accept").send({ token: tokenOf(link) })).status).toBe(401);
+  });
+
   it("lets several invite links be open at once", async () => {
     const links = await Promise.all([inviteLink("viewer"), inviteLink("viewer"), inviteLink("editor")]);
     expect(new Set(links).size).toBe(3);
