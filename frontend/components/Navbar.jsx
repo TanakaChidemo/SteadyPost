@@ -3,6 +3,7 @@
 import React, { useEffect } from "react";
 import Link from "next/link";
 import { useAppStore } from "../lib/store";
+import { can } from "../lib/roles";
 import { SparklesIcon, PlusIcon, UsersIcon } from "./Icons";
 import { WorkspaceSelector } from "./WorkspaceSelector";
 import { BusinessProfileModal } from "./BusinessProfileModal";
@@ -71,8 +72,8 @@ export function Navbar() {
           </Link>
         )}
 
-        {/* AI Assistant Quick Trigger */}
-        {user && (
+        {/* AI Assistant Quick Trigger (not for viewers: every AI action writes) */}
+        {user && can(currentWorkspace, "ai.use") && (
           <button
             onClick={() => setAiModalOpen(true)}
             className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border border-purple-500/40 text-purple-200 hover:border-purple-400 text-xs font-medium transition"
@@ -82,7 +83,8 @@ export function Navbar() {
           </button>
         )}
 
-        {/* Create Post Action (signed out, it asks you to sign in instead) */}
+        {/* Create Post Action (signed out, it asks you to sign in instead; viewers can't write posts) */}
+        {(!user || can(currentWorkspace, "post.write")) && (
         <Link
           href="/dashboard/content"
           onClick={(e) => {
@@ -96,6 +98,7 @@ export function Navbar() {
           <PlusIcon className="w-4 h-4" />
           <span>New Post</span>
         </Link>
+        )}
 
         {/* User Account / Auth */}
         {user ? (
