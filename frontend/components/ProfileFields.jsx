@@ -6,7 +6,7 @@ import { LIMITS } from "../lib/profileOptions";
 // Inputs shared by the onboarding wizard and the profile editor. 16px text on
 // phones stops iOS zooming into the field; it drops to the app's 12px from sm.
 export const inputClass =
-  "w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500";
+  "w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed";
 
 export function Field({ label, hint, children }) {
   return (

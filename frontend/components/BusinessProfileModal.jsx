@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
+import { can } from "../lib/roles";
 import { normaliseWebsiteUrl, websiteInputProps } from "../lib/websiteUrl";
 import {
   CHANNELS,
@@ -49,7 +50,10 @@ export function BusinessProfileModal() {
     addToast,
   } = useAppStore();
 
-  const [activeTab, setActiveTab] = useState("profile"); // "profile" | "notifications"
+  const [activeTab, setActiveTab] = useState("profile"); // "profile" | "notifications" | "guardrails"
+  // Editors may edit the profile and guardrails; renaming the business and its
+  // notification budget are the owner's (workspace.manage).
+  const canManage = can(currentWorkspace, "workspace.manage");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -184,7 +188,7 @@ export function BusinessProfileModal() {
     try {
       setSaving(true);
       await api.businessProfile.update({
-        name: name.trim() || undefined,
+        name: canManage ? name.trim() || undefined : undefined,
         businessType: businessType.trim(),
         websiteUrl: normaliseWebsiteUrl(websiteUrl),
         offer: offer.trim(),
@@ -202,14 +206,16 @@ export function BusinessProfileModal() {
         },
       });
 
-      await api.businessProfile.updateNotifications({
-        dailyCap: Number(dailyCap),
-        quietHours: {
-          enabled: quietHoursEnabled,
-          start: quietStart,
-          end: quietEnd,
-        },
-      });
+      if (canManage) {
+        await api.businessProfile.updateNotifications({
+          dailyCap: Number(dailyCap),
+          quietHours: {
+            enabled: quietHoursEnabled,
+            start: quietStart,
+            end: quietEnd,
+          },
+        });
+      }
 
       await fetchWorkspaces();
       addToast("success", "Business profile & settings saved!");
@@ -277,7 +283,9 @@ export function BusinessProfileModal() {
           >
             Brand & Audience Context
           </button>
+          {canManage && (
           <button
+            type="button"
             onClick={() => setActiveTab("notifications")}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
               activeTab === "notifications"
@@ -287,6 +295,7 @@ export function BusinessProfileModal() {
           >
             Notification Budget
           </button>
+          )}
           <button
             type="button"
             onClick={() => setActiveTab("guardrails")}
@@ -308,17 +317,25 @@ export function BusinessProfileModal() {
           <form onSubmit={handleSave} className="space-y-4">
             {activeTab === "profile" && (
               <>
-                <Field label="Profile / Business Name *" hint="This is the label displayed in your top dropdown menu.">
+                <Field
+                  label="Profile / Business Name *"
+                  hint={
+                    canManage
+                      ? "This is the label displayed in your top dropdown menu."
+                      : "Only the business owner can rename the business."
+                  }
+                >
                   <input
                     type="text"
                     required
+                    disabled={!canManage}
                     maxLength={LIMITS.name}
                     placeholder="e.g. Apex Apparel, SteadyPost Marketing, Gen Venture"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className={inputClass}
                   />
-                  {nameSuggestion(name, websiteName) && (
+                  {canManage && nameSuggestion(name, websiteName) && (
                     <NameSuggestion name={nameSuggestion(name, websiteName)} onUse={() => setName(websiteName.trim())} />
                   )}
                 </Field>
@@ -392,7 +409,7 @@ export function BusinessProfileModal() {
               </>
             )}
 
-            {activeTab === "notifications" && (
+            {activeTab === "notifications" && canManage && (
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">
