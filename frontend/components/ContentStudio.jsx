@@ -209,6 +209,24 @@ export function ContentStudio() {
       }
     : {};
 
+  // Fills the schedule and Google Business options from a saved draft or a
+  // post being revised, so they aren't lost between saves.
+  function restoreSchedule(iso) {
+    if (iso) {
+      setScheduleMode("scheduled");
+      setScheduledAtInput(toDateTimeLocal(iso));
+    } else {
+      setScheduleMode("immediate");
+      setScheduledAtInput("");
+    }
+  }
+  function restoreGbpOptions(options) {
+    setGbpTopicType(options?.topicType || "STANDARD");
+    // No saved options: the default call to action. Saved without one: none.
+    setGbpCtaAction(options ? options.callToAction?.actionType || "" : "LEARN_MORE");
+    setGbpCtaUrl(options?.callToAction?.url || "");
+  }
+
   // The account the Live Feed Preview labels itself with — prefer a selected
   // account for the previewed platform, otherwise any connected one.
   const previewAccount =
@@ -257,6 +275,8 @@ export function ContentStudio() {
       setMediaUrls(activeDraft.content?.mediaUrls || []);
       setPreviewMediaIndex(0);
       setGuardrailAudit(activeDraft.aiMetadata?.guardrails || null);
+      restoreSchedule(activeDraft.scheduledAt);
+      restoreGbpOptions(activeDraft.aiMetadata?.gbpOptions);
       const firstAccount = socialAccounts.find((a) => a.id === accountIds[0]);
       setPreviewPlatform(normalizePlatformId(firstAccount?.platform || activeDraft.channel));
     }
@@ -345,8 +365,12 @@ export function ContentStudio() {
       mediaUrls,
       targetAccountIds: selectedAccountIds,
       channel: accountFor(selectedAccountIds[0])?.platform || previewPlatform,
+      scheduledAt: draftScheduleIso(),
     };
-    const saved = activeDraft?.id ? await api.posts.update(activeDraft.id, fields) : await api.posts.create(fields);
+    const gbpOptions = hasGbpSelected ? gbpOptionsPayload : null;
+    const saved = activeDraft?.id
+      ? await api.posts.update(activeDraft.id, { ...fields, gbpOptions })
+      : await api.posts.create({ ...fields, ...(gbpOptions ? { aiMetadata: { gbpOptions } } : {}) });
     setActiveDraft(saved);
     return saved;
   }
@@ -381,6 +405,14 @@ export function ContentStudio() {
       )
     );
     return [first, ...copies];
+  }
+
+  // The schedule kept on a draft. Unlike sending, a draft may hold a time
+  // that's passed; it's checked when the post is sent.
+  function draftScheduleIso() {
+    if (scheduleMode !== "scheduled" || !scheduledAtInput) return null;
+    const d = new Date(scheduledAtInput);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }
 
   function getValidatedScheduledIso() {
@@ -552,7 +584,13 @@ export function ContentStudio() {
     try {
       let submitted;
       if (revisingPost) {
-        await api.posts.update(revisingPost.id, { title, body, mediaUrls, scheduledAt: scheduledIso });
+        await api.posts.update(revisingPost.id, {
+          title,
+          body,
+          mediaUrls,
+          scheduledAt: scheduledIso,
+          ...(isGbpAccount(revisingPost.socialAccountId) ? { gbpOptions: gbpOptionsPayload } : {}),
+        });
         submitted = [await api.posts.submitApproval(revisingPost.id, { comment })];
       } else {
         const draft = await saveDraftPost();
@@ -589,12 +627,8 @@ export function ContentStudio() {
     setPreviewMediaIndex(0);
     if (post.socialAccountId) setSelectedAccountIds([post.socialAccountId]);
     setPreviewPlatform(normalizePlatformId(post.channel));
-    if (post.scheduledAt) {
-      setScheduleMode("scheduled");
-      setScheduledAtInput(toDateTimeLocal(post.scheduledAt));
-    } else {
-      setScheduleMode("immediate");
-    }
+    restoreSchedule(post.scheduledAt);
+    restoreGbpOptions(post.aiMetadata?.gbpOptions);
     setApprovalNote("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -709,6 +743,8 @@ export function ContentStudio() {
     setSelectedAccountIds(socialAccounts.map((a) => a.id));
     setMediaUrls([]);
     setPreviewMediaIndex(0);
+    restoreSchedule(null);
+    restoreGbpOptions(null);
   }
 
   async function handleFilesSelected(e) {

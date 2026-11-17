@@ -133,6 +133,25 @@ describe("Drafts on posts (F10)", () => {
     expect(res.body.aiMetadata.guardrails).toBeDefined();
   });
 
+  it("keeps a draft's schedule and Google Business options between saves", async () => {
+    const when = new Date(Date.now() + 86400000).toISOString();
+    const gbpOptions = { topicType: "OFFER", callToAction: { actionType: "ORDER", url: "https://rosies.example/order" } };
+    const created = await saveDraft(people.editor, { scheduledAt: when, aiMetadata: { gbpOptions } });
+    expect(created.status).toBe(201);
+    expect(new Date(created.body.scheduledAt).toISOString()).toBe(when);
+    expect(created.body.aiMetadata.gbpOptions).toEqual(gbpOptions);
+
+    const changed = { topicType: "STANDARD" };
+    const updated = await request(app)
+      .put(`/api/v1/posts/${created.body.id}`)
+      .set(as(people.editor))
+      .send({ body: "Cakes all weekend, now with pies", scheduledAt: null, gbpOptions: changed });
+    expect(updated.status).toBe(200);
+    expect(updated.body.scheduledAt).toBeNull();
+    expect(updated.body.aiMetadata.gbpOptions).toEqual(changed);
+    expect(updated.body.aiMetadata.guardrails).toBeTruthy();
+  });
+
   describe("deleting drafts", () => {
     const del = (who, post) => request(app).delete(`/api/v1/posts/${post.id}`).set(as(who));
 
