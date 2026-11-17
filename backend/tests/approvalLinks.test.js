@@ -98,8 +98,15 @@ describe("Approval link replays", () => {
       const post = await pendingPost(bakery);
       const token = await linkFor(rosie, bakery, post);
       const results = await Promise.all([redeem(rosie, token), redeem(rosie, token), redeem(rosie, token)]);
-      expect(results.map((r) => r.body.outcome).sort()).toEqual(["already_used", "already_used", "done"]);
+      expect(results.filter((r) => r.body.outcome === "done")).toHaveLength(1);
+      // The others either saw the decision already made, or were told it's
+      // being made, never "already used" before it has been.
+      for (const r of results.filter((r) => r.body.outcome !== "done")) {
+        if (r.status === 200) expect(r.body).toMatchObject({ outcome: "already_used", previousOutcome: "approve" });
+        else expect(r.body.code).toBe("IN_PROGRESS");
+      }
       expect(await eventsOf(post)).toHaveLength(1);
+      expect((await redeem(rosie, token)).body).toMatchObject({ outcome: "already_used", previousOutcome: "approve" });
     });
 
     it("uses only one of an approve and a reject sent together", async () => {
@@ -124,6 +131,10 @@ describe("Approval link replays", () => {
       const res = await redeem(rosie, token);
       expect(res.status).toBe(409);
       expect(res.body.code).toBe("STALE");
+      // Tapping it again gets the same answer, not "already used".
+      const again = await redeem(rosie, token);
+      expect(again.status).toBe(409);
+      expect(again.body.code).toBe("STALE");
       expect(await statusOf(post)).toBe("pending_approval");
       expect((await eventsOf(post)).map((e) => e.action)).toEqual(["submit"]);
     });
@@ -152,7 +163,11 @@ describe("Approval link replays", () => {
       const token = await linkFor(ama, amaShop, post);
       await membershipModel.Membership.updateOne({ workspaceId: amaShop.id, userId: ama.user.id }, { status: "removed" });
       expect((await redeem(ama, token)).status).toBe(403);
+      expect((await redeem(ama, token)).status).toBe(403);
       expect(await statusOf(post)).toBe("pending_approval");
+      // A refused tap didn't use the link up: back on the team, it works.
+      await membershipModel.Membership.updateOne({ workspaceId: amaShop.id, userId: ama.user.id }, { status: "active" });
+      expect((await redeem(ama, token)).body.outcome).toBe("done");
       await membershipModel.Membership.deleteMany({ workspaceId: amaShop.id });
       await postModel.Post.deleteMany({ workspaceId: amaShop.id });
       await workspaceModel.Workspace.deleteMany({ _id: amaShop.id });
@@ -186,11 +201,23 @@ describe("Approval link replays", () => {
       expect((await redeem(rosie, token)).body.outcome).toBe("done");
     });
 
-    it("refuses a link issued to an editor, who can't approve", async () => {
+    it("won't issue a link to an editor, who can't approve, or to someone outside the business", async () => {
       const post = await pendingPost(bakery);
-      const token = await linkFor(editor, bakery, post);
-      expect((await redeem(editor, token)).status).toBe(403);
+      await expect(linkFor(editor, bakery, post)).rejects.toMatchObject({ status: 403 });
+      await expect(linkFor(kofi, bakery, post)).rejects.toMatchObject({ status: 403 });
+      expect(await approvalLinkModel.ApprovalLink.countDocuments({ postId: post.id })).toBe(0);
+    });
+
+    it("refuses a link whose person can no longer approve", async () => {
+      const [co, coShop] = await owner("Co", "Co's Cafe");
+      const post = await pendingPost(coShop);
+      const token = await linkFor(co, coShop, post);
+      await membershipModel.Membership.updateOne({ workspaceId: coShop.id, userId: co.user.id }, { role: "editor" });
+      expect((await redeem(co, token)).status).toBe(403);
       expect(await statusOf(post)).toBe("pending_approval");
+      await membershipModel.Membership.deleteMany({ workspaceId: coShop.id });
+      await postModel.Post.deleteMany({ workspaceId: coShop.id });
+      await workspaceModel.Workspace.deleteMany({ _id: coShop.id });
     });
 
     it("can't issue a link for a post in another business", async () => {

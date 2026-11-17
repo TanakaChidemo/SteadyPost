@@ -49,13 +49,28 @@ async function findByToken(token) {
   return withId(await ApprovalLink.findOne({ tokenHash: hashToken(token) }).lean());
 }
 
-/** Marks the link used, only if nobody used it first. Null if they did. */
+/**
+ * Marks the link used, only if nobody used it first. Null if they did. The
+ * outcome stays empty until the decision is made (see recordOutcome), which is
+ * how a second tap tells a decision in progress from one that's done.
+ */
 async function claim(id) {
-  return withId(await ApprovalLink.findOneAndUpdate({ _id: id, usedAt: null }, { usedAt: new Date() }, { new: true }).lean());
+  return withId(
+    await ApprovalLink.findOneAndUpdate({ _id: id, usedAt: null }, { usedAt: new Date(), outcome: null }, { new: true }).lean()
+  );
 }
 
 async function recordOutcome(id, outcome) {
   await ApprovalLink.updateOne({ _id: id }, { outcome });
 }
 
-module.exports = { ApprovalLink, hashToken, contentHashOf, create, findByToken, claim, recordOutcome };
+/**
+ * Gives back a claim whose decision failed, so the link isn't used up by an
+ * error: the next tap is checked again and gets the same refusal. `outcome`
+ * keeps the last refusal for the record.
+ */
+async function release(id, outcome) {
+  await ApprovalLink.updateOne({ _id: id }, { usedAt: null, outcome });
+}
+
+module.exports = { ApprovalLink, hashToken, contentHashOf, create, findByToken, claim, recordOutcome, release };
