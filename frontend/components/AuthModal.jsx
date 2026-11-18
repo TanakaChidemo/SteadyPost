@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
+import { rememberSignInReturn } from "../lib/signInReturn";
 import { SparklesIcon, CheckIcon } from "./Icons";
 
 const API_BASE_URL =
@@ -40,6 +41,8 @@ export function AuthModal() {
   }
 
   function handleGoogleLogin() {
+    // Come back to this page (e.g. an invite) once Google has signed you in.
+    rememberSignInReturn();
     window.location.href = `${API_BASE_URL}/auth/oauth/google`;
   }
 

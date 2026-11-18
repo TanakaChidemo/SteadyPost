@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAppStore } from "../../lib/store";
 import { api } from "../../lib/apiClient";
+import { can } from "../../lib/roles";
 import {
   SparklesIcon,
   InstagramIcon,
@@ -26,8 +27,23 @@ const QUICK_PLATFORMS = [
 ];
 
 export default function DashboardOverviewPage() {
-  const { user, authReady, token, drafts, setDrafts, socialAccounts, addToast, setAiModalOpen, setAuthModalOpen } =
-    useAppStore();
+  const {
+    user,
+    authReady,
+    token,
+    currentWorkspace,
+    drafts,
+    setDrafts,
+    socialAccounts,
+    addToast,
+    setAiModalOpen,
+    setAuthModalOpen,
+  } = useAppStore();
+  // Only the owner publishes; editors write in the studio and send posts for
+  // approval; viewers only look (F10). Signed-out visitors see the composer
+  // and are asked to sign in.
+  const canPublish = !user || can(currentWorkspace, "post.publish");
+  const canWrite = !user || can(currentWorkspace, "post.write");
 
   const [quickPost, setQuickPost] = useState("");
   const [quickPlatform, setQuickPlatform] = useState("instagram");
@@ -37,7 +53,7 @@ export default function DashboardOverviewPage() {
     // Wait for auth to be resolved (token restored from localStorage) so this
     // doesn't fire before login and silently 401, leaving stats stuck at 0.
     if (authReady && user) loadData();
-  }, [authReady, token, user]);
+  }, [authReady, token, user, currentWorkspace]);
 
   // Signed out, links into the studio ask you to sign in instead.
   function requireSignIn(e) {
@@ -48,7 +64,7 @@ export default function DashboardOverviewPage() {
 
   async function loadData() {
     try {
-      const draftItems = await api.content.list();
+      const draftItems = await api.posts.list({ status: "draft" });
       setDrafts(draftItems);
     } catch (err) {
       // fallback
@@ -71,20 +87,19 @@ export default function DashboardOverviewPage() {
     if (!quickPost.trim()) return addToast("error", "Write some text to publish");
     setIsPublishing(true);
     try {
-      const draft = await api.content.create({
-        title: `Quick Post (${quickPlatform})`,
-        body: quickPost,
-        platforms: [quickPlatform],
-      });
+      // A business post published through /posts/:id/publish-now, so it shows
+      // in the pipeline with its history and metrics (F10).
       const matchedAccount = socialAccounts.find(
         (a) => a.platform === quickPlatform || (quickPlatform === "gbp" && a.platform === "google_business")
       );
-      const { postId } = await api.publish.now({
-        contentDraftId: draft._id,
-        platform: quickPlatform,
+      const post = await api.posts.create({
+        title: `Quick Post (${quickPlatform})`,
+        body: quickPost,
+        channel: matchedAccount?.platform || quickPlatform,
         ...(matchedAccount ? { socialAccountId: matchedAccount.id } : {}),
       });
-      const result = await api.publish.waitForResult(postId);
+      const { postId } = await api.posts.publishNow(post.id);
+      const result = await api.publish.waitForResult(postId || post.id);
       if (result.status === "published") {
         addToast("success", `🚀 Published to ${quickPlatform}!`);
         setQuickPost("");
@@ -115,7 +130,7 @@ export default function DashboardOverviewPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {user && (
+          {user && canWrite && (
             <button
               onClick={() => setAiModalOpen(true)}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-purple-950/60 border border-purple-500/40 text-purple-300 text-xs font-semibold hover:border-purple-400 transition"
@@ -124,14 +139,16 @@ export default function DashboardOverviewPage() {
               <span>Write with AI</span>
             </button>
           )}
-          <Link
-            href="/dashboard/content"
-            onClick={requireSignIn}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
-          >
-            <PlusIcon className="w-4 h-4" />
-            <span>New Campaign</span>
-          </Link>
+          {canWrite && (
+            <Link
+              href="/dashboard/content"
+              onClick={requireSignIn}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span>New Campaign</span>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -173,7 +190,18 @@ export default function DashboardOverviewPage() {
         </div>
       </div>
 
-      {/* Quick Composer */}
+      {/* Quick Composer: owner only. Editors are pointed to the studio. */}
+      {!canPublish && canWrite && (
+        <div className="p-5 rounded-lg bg-slate-900/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <p className="text-xs text-slate-400">
+            Write posts in the Content Studio and send them to the owner for approval. Only the owner publishes.
+          </p>
+          <Link href="/dashboard/content" className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold shrink-0">
+            Open Content Studio →
+          </Link>
+        </div>
+      )}
+      {canPublish && (
       <div className="grid grid-cols-1 gap-6">
         <div className="p-5 rounded-lg bg-slate-900/80 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between">
@@ -233,6 +261,7 @@ export default function DashboardOverviewPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ const businessProfileModel = require("../models/businessProfile.model");
 const notificationSettingsModel = require("../models/notificationSettings.model");
 const workspaceModel = require("../models/workspace.model");
 const { profileFieldsSchema } = require("../validation/businessProfile");
+const { can, refusalMessage } = require("../auth/permissions");
 
 // The profile's name is the workspace's name, so it's read from and saved to
 // the workspace.
@@ -36,8 +37,16 @@ async function updateProfile(req, res) {
   }
 
   const { name, onboardingCompleted, ...fields } = parsed.data;
+  // The profile's name is the business's name, and renaming the business is the
+  // owner's call (workspace.manage), even though editors may edit the rest.
   if (name) {
-    await workspaceModel.updateById(req.workspaceId, { name });
+    const current = await workspaceModel.findById(req.workspaceId);
+    if (name !== current?.name) {
+      if (!can(req.membership.role, "workspace.manage")) {
+        return res.status(403).json({ error: refusalMessage("workspace.manage"), code: "FORBIDDEN" });
+      }
+      await workspaceModel.updateById(req.workspaceId, { name });
+    }
   }
   if (onboardingCompleted) {
     fields.onboardingCompletedAt = new Date();

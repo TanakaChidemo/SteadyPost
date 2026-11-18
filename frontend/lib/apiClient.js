@@ -181,8 +181,18 @@ export const api = {
     create: (data) => apiClient.post("/workspaces", data).then((r) => r.data),
     switch: (id) => apiClient.post(`/workspaces/switch/${id}`).then((r) => r.data),
     archiveCurrent: () => apiClient.post("/workspaces/current/archive").then((r) => r.data),
-    listMembers: () => apiClient.get("/workspaces/current/members").then((r) => r.data.items || []),
-    inviteMember: (data) => apiClient.post("/workspaces/current/invitations", data).then((r) => r.data),
+    // { members, invitations }; invitations only for whoever manages the team.
+    team: () => apiClient.get("/workspaces/current/members").then((r) => r.data),
+    createInvite: (role, label) =>
+      apiClient.post("/workspaces/current/invitations", { role, label }).then((r) => r.data),
+    cancelInvite: (id) => apiClient.delete(`/workspaces/current/invitations/${id}`),
+    changeRole: (memberId, role) =>
+      apiClient.patch(`/workspaces/current/members/${memberId}`, { role }).then((r) => r.data),
+    removeMember: (memberId) => apiClient.delete(`/workspaces/current/members/${memberId}`),
+    leave: () => apiClient.post("/workspaces/current/leave").then((r) => r.data),
+    previewInvite: (token) =>
+      apiClient.get(`/workspaces/invitations/${encodeURIComponent(token)}`).then((r) => r.data),
+    acceptInvite: (token) => apiClient.post("/workspaces/invitations/accept", { token }).then((r) => r.data),
   },
   businessProfile: {
     get: () => apiClient.get("/business-profile/profile").then((r) => r.data),
@@ -205,6 +215,7 @@ export const api = {
     submitApproval: (id, data = {}) => apiClient.post(`/posts/${id}/submit-approval`, data).then((r) => r.data),
     approve: (id, data = {}) => apiClient.post(`/posts/${id}/approve`, data).then((r) => r.data),
     requestChanges: (id, data = {}) => apiClient.post(`/posts/${id}/request-changes`, data).then((r) => r.data),
+    reject: (id, data = {}) => apiClient.post(`/posts/${id}/reject`, data).then((r) => r.data),
     publishNow: (id, data = {}) => apiClient.post(`/posts/${id}/publish-now`, data).then((r) => r.data),
     publishApproved: (data = {}) => apiClient.post("/posts/publish-approved", data).then((r) => r.data),
     getMetrics: (id) => apiClient.get(`/posts/${id}/metrics`).then((r) => r.data),

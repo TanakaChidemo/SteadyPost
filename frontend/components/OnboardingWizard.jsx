@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppStore } from "../lib/store";
 import { api } from "../lib/apiClient";
+import { can } from "../lib/roles";
 import { normaliseWebsiteUrl, websiteInputProps } from "../lib/websiteUrl";
 import {
   CHANNELS,
@@ -88,6 +89,9 @@ export function OnboardingWizard({ prefill = null }) {
   } = useAppStore();
   const mode = onboarding?.mode;
   const workspaceId = currentWorkspace?.id || currentWorkspace?._id;
+  // An editor finishing a business's setup can fill in the profile, but only
+  // the owner renames the business (workspace.manage).
+  const canRename = mode === "create" || can(currentWorkspace, "workspace.manage");
 
   const [step, setStep] = useState(0);
   const [values, setValues] = useState(EMPTY_VALUES);
@@ -205,7 +209,7 @@ export function OnboardingWizard({ prefill = null }) {
           await api.website.connect(payload.websiteUrl).catch(() => {});
         }
       } else {
-        await api.businessProfile.update(payload);
+        await api.businessProfile.update(canRename ? payload : { ...payload, name: undefined });
         await fetchWorkspaces();
       }
       addToast("success", `${payload.name} is set up`);
@@ -306,10 +310,18 @@ export function OnboardingWizard({ prefill = null }) {
                       not right.
                     </p>
                   ) : null}
-                  <Field label="Business name *" hint="Shown in the profile menu at the top of the app.">
+                  <Field
+                    label="Business name *"
+                    hint={
+                      canRename
+                        ? "Shown in the profile menu at the top of the app."
+                        : "Only the business owner can rename the business."
+                    }
+                  >
                     <input
                       type="text"
                       autoFocus
+                      disabled={!canRename}
                       autoComplete="organization"
                       maxLength={LIMITS.name}
                       placeholder="e.g. Rosie's Bakery"
@@ -317,7 +329,7 @@ export function OnboardingWizard({ prefill = null }) {
                       onChange={setText("name")}
                       className={inputClass}
                     />
-                    {suggestedName && <NameSuggestion name={suggestedName} onUse={() => set("name")(suggestedName)} />}
+                    {canRename && suggestedName && <NameSuggestion name={suggestedName} onUse={() => set("name")(suggestedName)} />}
                   </Field>
                   <Field label="Type of business">
                     <input

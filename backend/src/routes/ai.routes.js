@@ -3,29 +3,29 @@ const aiController = require("../controllers/ai.controller");
 const postController = require("../controllers/post.controller");
 const { requireAuth } = require("../middleware/auth");
 const { resolveWorkspace } = require("../middleware/workspaceContext");
-const { requireWorkspaceRole } = require("../middleware/requireWorkspaceRole");
+const { requirePermission } = require("../middleware/requirePermission");
 
 const router = express.Router();
 router.use(requireAuth, resolveWorkspace);
 
 router.post(
   "/generate-caption",
-  requireWorkspaceRole("owner", "editor"),
+  requirePermission("ai.use"),
   aiController.generateCaption
 );
 router.post(
   "/suggest-hashtags",
-  requireWorkspaceRole("owner", "editor"),
+  requirePermission("ai.use"),
   aiController.suggestHashtags
 );
 router.post(
   "/repurpose",
-  requireWorkspaceRole("owner", "editor"),
+  requirePermission("ai.use"),
   aiController.repurposeContent
 );
 router.post(
   "/generate-variants",
-  requireWorkspaceRole("owner", "editor"),
+  requirePermission("ai.use"),
   postController.generateVariants
 );
 

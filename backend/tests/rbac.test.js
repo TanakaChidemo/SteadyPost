@@ -89,7 +89,7 @@ describe("Role-Based Access Control (RBAC) & Membership Tests", () => {
       .send({ body: "Viewer attempting write", channel: "facebook" });
 
     expect(createRes.status).toBe(403);
-    expect(createRes.body.error).toMatch(/Insufficient workspace permissions/i);
+    expect(createRes.body.error).toMatch(/Viewers can look but not make changes/);
   });
 
   it("Editor can create a draft and submit for approval", async () => {
@@ -124,7 +124,7 @@ describe("Role-Based Access Control (RBAC) & Membership Tests", () => {
       .set("X-Workspace-Id", workspace.id);
 
     expect(approveRes.status).toBe(403);
-    expect(approveRes.body.error).toMatch(/Insufficient workspace permissions/i);
+    expect(approveRes.body.error).toBe("Only the business owner can do this.");
   });
 
   it("Editor cannot invite new members (403)", async () => {
@@ -154,7 +154,35 @@ describe("Role-Based Access Control (RBAC) & Membership Tests", () => {
       .send({ email: "newguest@example.com", role: "viewer" });
 
     expect(inviteRes.status).toBe(201);
-    expect(inviteRes.body.membership.status).toBe("invited");
+    expect(inviteRes.body.invitation.role).toBe("viewer");
     expect(inviteRes.body.inviteLink).toBeTruthy();
+  });
+  it("Editor can save the profile under the same name but cannot rename the business (403)", async () => {
+    const sameName = await request(app)
+      .put("/api/v1/business-profile/profile")
+      .set("Authorization", `Bearer ${editorToken}`)
+      .set("X-Workspace-Id", workspace.id)
+      .send({ name: "RBAC Venture", offer: "Editor-written offer" });
+    expect(sameName.status).toBe(200);
+    expect(sameName.body.offer).toBe("Editor-written offer");
+
+    const rename = await request(app)
+      .put("/api/v1/business-profile/profile")
+      .set("Authorization", `Bearer ${editorToken}`)
+      .set("X-Workspace-Id", workspace.id)
+      .send({ name: "Editor Renamed It" });
+    expect(rename.status).toBe(403);
+    expect(rename.body.error).toBe("Only the business owner can do this.");
+    expect((await workspaceModel.findById(workspace.id)).name).toBe("RBAC Venture");
+  });
+
+  it("Owner can rename the business from the profile", async () => {
+    const res = await request(app)
+      .put("/api/v1/business-profile/profile")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .set("X-Workspace-Id", workspace.id)
+      .send({ name: "RBAC Venture Renamed" });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("RBAC Venture Renamed");
   });
 });

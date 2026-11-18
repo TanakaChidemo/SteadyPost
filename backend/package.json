@@ -8,7 +8,8 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "lint": "eslint src --ext .js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "migrate:drafts": "node scripts/migrate-drafts-to-posts.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

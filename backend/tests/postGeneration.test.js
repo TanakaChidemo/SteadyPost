@@ -311,17 +311,17 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
     expect(res.body.items[0].status).toBe("draft");
     expect(res.body.items[1].channel).toBe("linkedin");
 
-    // Verify saved drafts appear in content studio drafts list
+    // Verify saved drafts appear in the Content Studio's drafts (the business's draft posts, F10)
     const draftsRes = await request(app)
-      .get("/api/v1/content/drafts")
+      .get("/api/v1/posts?status=draft")
       .set("Authorization", `Bearer ${ownerToken}`)
       .set("X-Workspace-Id", workspace.id);
 
     expect(draftsRes.status).toBe(200);
     expect(draftsRes.body.items).toBeDefined();
-    const batchTweetDraft = draftsRes.body.items.find((d) => d.title === "Batch Tweet");
+    const batchTweetDraft = draftsRes.body.items.find((d) => d.content?.title === "Batch Tweet");
     expect(batchTweetDraft).toBeDefined();
-    expect(batchTweetDraft.body).toBe("Tweet content from batch");
+    expect(batchTweetDraft.content.body).toBe("Tweet content from batch");
   });
 
   it("enforces role checks on generation endpoints and rejects viewers with 403", async () => {
@@ -407,9 +407,9 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
     const draftId = createRes.body.items[0]._id || createRes.body.items[0].id;
     expect(draftId).toBeDefined();
 
-    // 2. Edit draft title and body via /content/:id
+    // 2. Edit draft title and body via /posts/:id (drafts are workspace Posts, F10)
     const updateRes = await request(app)
-      .put(`/api/v1/content/${draftId}`)
+      .put(`/api/v1/posts/${draftId}`)
       .set("Authorization", `Bearer ${ownerToken}`)
       .set("X-Workspace-Id", workspace.id)
       .send({
@@ -421,16 +421,16 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
 
     // 3. Verify drafts list has only 1 item for this draft (no duplicates created by broken text match)
     const listRes = await request(app)
-      .get("/api/v1/content/drafts")
+      .get("/api/v1/posts?status=draft")
       .set("Authorization", `Bearer ${ownerToken}`)
       .set("X-Workspace-Id", workspace.id);
 
-    const matching = listRes.body.items.filter((d) => d._id === draftId || d.title?.includes("Artisan Bread Special"));
+    const matching = listRes.body.items.filter((d) => d.id === draftId || d.content?.title?.includes("Artisan Bread Special"));
     expect(matching.length).toBe(1);
 
-    // 4. Delete the draft via /content/:id
+    // 4. Delete the draft via /posts/:id
     const deleteRes = await request(app)
-      .delete(`/api/v1/content/${draftId}`)
+      .delete(`/api/v1/posts/${draftId}`)
       .set("Authorization", `Bearer ${ownerToken}`)
       .set("X-Workspace-Id", workspace.id);
 
@@ -438,12 +438,12 @@ describe("Omnichannel Post Generation & Repurposing (#05)", () => {
 
     // 5. Verify the draft is completely gone and no phantom post reappears
     const listAfterDelete = await request(app)
-      .get("/api/v1/content/drafts")
+      .get("/api/v1/posts?status=draft")
       .set("Authorization", `Bearer ${ownerToken}`)
       .set("X-Workspace-Id", workspace.id);
 
     const ghost = listAfterDelete.body.items.find(
-      (d) => d._id === draftId || d.title?.includes("Artisan Bread Special") || d.body?.includes("sourdough")
+      (d) => d.id === draftId || d.content?.title?.includes("Artisan Bread Special") || d.content?.body?.includes("sourdough")
     );
     expect(ghost).toBeUndefined();
   });

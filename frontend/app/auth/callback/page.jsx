@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppStore } from "../../../lib/store";
 import { api, setTokens, clearTokens } from "../../../lib/apiClient";
+import { takeSignInReturn } from "../../../lib/signInReturn";
 import { SparklesIcon } from "../../../components/Icons";
 
 function CallbackFallback() {
@@ -45,7 +46,8 @@ function AuthCallbackContent() {
       .then((res) => {
         setUser(res.user, accessToken, refreshToken);
         addToast("success", `Welcome, ${res.user.name}!`);
-        router.replace("/dashboard");
+        // Back to where sign-in started, e.g. the invite being accepted.
+        router.replace(takeSignInReturn());
       })
       .catch(() => {
         clearTokens();

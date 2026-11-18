@@ -1,6 +1,6 @@
 const { z } = require("zod");
 const postModel = require("../models/post.model");
-const contentDraftModel = require("../models/contentDraft.model");
+const { can } = require("../auth/permissions");
 const approvalEventModel = require("../models/approvalEvent.model");
 const predictionRecordModel = require("../models/predictionRecord.model");
 const postMetricsModel = require("../models/postMetrics.model");
@@ -10,6 +10,8 @@ const { enqueuePublishJob } = require("../queue");
 const { resolveAccountCredentials } = require("../queue/publishProcessor");
 const { getAdapter } = require("../services/publishers/adapterRegistry");
 const guardrailsService = require("../services/guardrails/guardrailsService");
+const approvalService = require("../services/approval.service");
+const userModel = require("../models/user.model");
 const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
 
 const ALLOWED_CHANNELS = ["twitter", "linkedin", "instagram", "facebook", "gbp", "google_business"];
@@ -20,6 +22,7 @@ const createPostSchema = z.object({
   body: z.string().min(1, "Post body is required"),
   channel: z.string().min(1, "Channel is required"),
   socialAccountId: z.string().optional().nullable(),
+  targetAccountIds: z.array(z.string()).max(25).optional(),
   campaignId: z.string().optional().nullable(),
   mediaUrls: z.array(z.string()).optional(),
   hashtags: z.array(z.string()).optional(),
@@ -31,7 +34,30 @@ const createPostSchema = z.object({
 async function list(req, res) {
   const { status, campaignId } = req.query;
   const items = await postModel.findByWorkspaceId(req.workspaceId, { status, campaignId });
-  return res.json({ items });
+
+  // The latest approval step on each post, so the studio can show the editor's
+  // note to the owner and the owner's comment back to the editor, and who
+  // wrote each post, since drafts are shared across the business (F10).
+  const latest = await approvalEventModel.latestByPostIds(items.map((p) => p.id));
+  const named = await withActorNames([...latest.values()]);
+  const byPost = new Map(named.map((e) => [e.postId, e]));
+  const authors = await namesFor(items.map((p) => p.authorId));
+  return res.json({
+    items: items.map((p) => ({
+      ...p,
+      authorName: authors.get(p.authorId) || "Former member",
+      lastApprovalEvent: byPost.get(p.id) || null,
+    })),
+  });
+}
+
+/** Checks every account a draft targets belongs to this business. Throws like validateAccountWorkspaceOwnership. */
+async function validateTargets(targetAccountIds, req) {
+  const ids = [...new Set(targetAccountIds)];
+  for (const socialAccountId of ids) {
+    await validateAccountWorkspaceOwnership({ socialAccountId, workspaceId: req.workspaceId, userId: req.user.id });
+  }
+  return ids;
 }
 
 async function create(req, res) {
@@ -45,6 +71,7 @@ async function create(req, res) {
     body,
     channel,
     socialAccountId = null,
+    targetAccountIds: requestedTargets = [],
     campaignId = null,
     mediaUrls = [],
     hashtags = [],
@@ -53,16 +80,18 @@ async function create(req, res) {
     aiMetadata = {},
   } = parsed.data;
 
-  if (socialAccountId) {
-    try {
+  let targetAccountIds;
+  try {
+    if (socialAccountId) {
       await validateAccountWorkspaceOwnership({
         socialAccountId,
         workspaceId: req.workspaceId,
         userId: req.user.id,
       });
-    } catch (err) {
-      return res.status(err.status || 403).json({ error: err.message });
     }
+    targetAccountIds = await validateTargets(requestedTargets, req);
+  } catch (err) {
+    return res.status(err.status || 403).json({ error: err.message });
   }
 
   const guardrails = await guardrailsService.auditDraft({
@@ -78,6 +107,7 @@ async function create(req, res) {
     authorId: req.user.id,
     channel,
     socialAccountId,
+    targetAccountIds,
     campaignId,
     content: { title, body, mediaUrls, hashtags },
     status: "draft",
@@ -93,17 +123,32 @@ async function create(req, res) {
   return res.status(201).json(post);
 }
 
+/** Display names for user ids, as a Map of id -> name (or email). */
+async function namesFor(userIds) {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (ids.length === 0) return new Map();
+  const users = await userModel.User.find({ _id: { $in: ids } }, { name: 1, email: 1 }).lean();
+  return new Map(users.map((u) => [u._id, u.name || u.email]));
+}
+
+/** Adds `actorName` to each approval event, for the post's history. */
+async function withActorNames(events) {
+  const names = await namesFor(events.map((e) => e.actorId));
+  return events.map((e) => ({ ...e, actorName: names.get(e.actorId) || "Former member" }));
+}
+
 async function getById(req, res) {
   const post = await postModel.findById(req.params.id);
   if (!post || post.workspaceId !== req.workspaceId) {
     return res.status(404).json({ error: "Post not found" });
   }
 
-  const [approvalEvents, predictionRecords, latestMetrics] = await Promise.all([
+  const [events, predictionRecords, latestMetrics] = await Promise.all([
     approvalEventModel.findByPostId(post.id),
     predictionRecordModel.findByPostId(post.id),
     postMetricsModel.getLatestByPostId(post.id),
   ]);
+  const approvalEvents = await withActorNames(events);
 
   return res.json({
     ...post,
@@ -113,10 +158,16 @@ async function getById(req, res) {
   });
 }
 
+// Posts that are on their way out, or already out, can't be edited.
+const LOCKED_FOR_EDITING = ["scheduled", "publishing", "published"];
+
 async function update(req, res) {
   const post = await postModel.findById(req.params.id);
   if (!post || post.workspaceId !== req.workspaceId) {
     return res.status(404).json({ error: "Post not found" });
+  }
+  if (LOCKED_FOR_EDITING.includes(post.status)) {
+    return res.status(409).json({ error: `This post is already ${post.status}, so it can't be edited.` });
   }
 
   const updates = {};
@@ -134,6 +185,16 @@ async function update(req, res) {
       }
     }
     updates.socialAccountId = req.body.socialAccountId;
+  }
+  if (req.body.targetAccountIds !== undefined) {
+    if (!Array.isArray(req.body.targetAccountIds) || req.body.targetAccountIds.some((id) => typeof id !== "string")) {
+      return res.status(400).json({ error: "targetAccountIds must be a list of account ids" });
+    }
+    try {
+      updates.targetAccountIds = await validateTargets(req.body.targetAccountIds, req);
+    } catch (err) {
+      return res.status(err.status || 403).json({ error: err.message });
+    }
   }
   if (req.body.campaignId !== undefined) updates.campaignId = req.body.campaignId;
   if (req.body.scheduledAt !== undefined) {
@@ -175,117 +236,53 @@ async function update(req, res) {
     };
   }
 
+  // Google Business Profile options (topic, call to action) for a post sent
+  // from a studio draft, used when it's published or queued on approval.
+  if (req.body.gbpOptions !== undefined) {
+    if (req.body.gbpOptions !== null && typeof req.body.gbpOptions !== "object") {
+      return res.status(400).json({ error: "gbpOptions must be an object" });
+    }
+    updates.aiMetadata = { ...(updates.aiMetadata || post.aiMetadata || {}), gbpOptions: req.body.gbpOptions || {} };
+  }
+
+  // An editor changing a post that's waiting for, or has, the owner's approval
+  // sends it back to draft: the owner only ever approves what they've seen.
+  const needsReapproval = ["pending_approval", "approved"].includes(post.status);
+  if (needsReapproval && req.membership.role !== "owner" && Object.keys(updates).length > 0) {
+    updates.status = "draft";
+  }
+
   const updated = await postModel.updateById(post.id, updates);
   return res.json(updated);
 }
 
-async function submitApproval(req, res) {
-  const post = await postModel.findById(req.params.id);
-  if (!post || post.workspaceId !== req.workspaceId) {
-    return res.status(404).json({ error: "Post not found" });
-  }
-
-  let guardrails = post.aiMetadata?.guardrails;
-  if (!guardrails) {
-    guardrails = await guardrailsService.auditDraft({
-      content: post.content?.body || "",
-      channel: post.channel || "instagram",
-      mediaUrls: post.content?.mediaUrls || [],
-      hashtags: post.content?.hashtags || [],
-      workspaceId: req.workspaceId,
-    });
-  }
-
-  const updated = await postModel.updateById(post.id, {
-    status: "pending_approval",
-    aiMetadata: {
-      ...(post.aiMetadata || {}),
-      guardrails,
-    },
-  });
-
-  await approvalEventModel.create({
-    postId: post.id,
-    actorId: req.user.id,
-    action: "submit",
-    comment: req.body.comment || "",
-  });
-
-  return res.json({
-    ...updated,
-    guardrailsWarning:
-      guardrails && !guardrails.passed
-        ? `Post has ${guardrails.violations?.length || 1} brand guardrail violation(s) requiring approver review.`
-        : null,
-  });
-}
-
-async function approve(req, res) {
-  const post = await postModel.findById(req.params.id);
-  if (!post || post.workspaceId !== req.workspaceId) {
-    return res.status(404).json({ error: "Post not found" });
-  }
-
-  if (post.socialAccountId) {
+// Approval actions go through the shared workflow (services/approval.service)
+// so the app, approval links and Telegram all follow the same rules.
+function approvalHandler(action) {
+  return async (req, res) => {
     try {
-      await validateAccountWorkspaceOwnership({
-        socialAccountId: post.socialAccountId,
+      const { post, guardrailsWarning } = await approvalService.applyApprovalAction({
         workspaceId: req.workspaceId,
-        userId: req.user.id,
+        postId: req.params.id,
+        actorId: req.user.id,
+        role: req.membership.role,
+        action,
+        comment: req.body?.comment,
       });
+      return res.json(action === "submit" ? { ...post, guardrailsWarning } : post);
     } catch (err) {
-      return res.status(err.status || 403).json({ error: err.message });
+      if (err instanceof approvalService.ApprovalError) {
+        return res.status(err.status).json({ error: err.message, code: err.code });
+      }
+      throw err;
     }
-  }
-
-  const targetStatus = post.scheduledAt ? "scheduled" : "approved";
-  const updated = await postModel.updateById(post.id, { status: targetStatus });
-
-  await approvalEventModel.create({
-    postId: post.id,
-    actorId: req.user.id,
-    action: "approve",
-    comment: req.body.comment || "",
-  });
-
-  if (post.scheduledAt) {
-    const delay = Math.max(0, new Date(post.scheduledAt).getTime() - Date.now());
-    await enqueuePublishJob(
-      {
-        postId: post.id,
-        platform: post.channel,
-        contentDraftId: post.id,
-        socialAccountId: post.socialAccountId || null,
-        workspaceId: req.workspaceId,
-        content: post.content?.body || "",
-        mediaUrls: post.content?.mediaUrls || [],
-        hashtags: post.content?.hashtags || [],
-        options: post.aiMetadata?.gbpOptions || post.aiMetadata?.options || {},
-      },
-      { delay }
-    );
-  }
-
-  return res.json(updated);
+  };
 }
 
-async function requestChanges(req, res) {
-  const post = await postModel.findById(req.params.id);
-  if (!post || post.workspaceId !== req.workspaceId) {
-    return res.status(404).json({ error: "Post not found" });
-  }
-
-  const updated = await postModel.updateById(post.id, { status: "changes_requested" });
-
-  await approvalEventModel.create({
-    postId: post.id,
-    actorId: req.user.id,
-    action: "request_changes",
-    comment: req.body.comment || "Changes requested",
-  });
-
-  return res.json(updated);
-}
+const submitApproval = approvalHandler("submit");
+const approve = approvalHandler("approve");
+const requestChanges = approvalHandler("request_changes");
+const reject = approvalHandler("reject");
 
 // Statuses a post can't be published from again.
 const ALREADY_PUBLISHING = ["scheduled", "publishing", "published"];
@@ -330,6 +327,7 @@ async function publishNow(req, res) {
   // the owner approving it, so the audit trail stays complete.
   if (post.status !== "approved") {
     await approvalEventModel.create({
+      workspaceId: req.workspaceId,
       postId: post.id,
       actorId: req.user.id,
       action: "approve",
@@ -464,6 +462,16 @@ async function deletePost(req, res) {
   const post = await postModel.findById(req.params.id);
   if (!post || post.workspaceId !== req.workspaceId) {
     return res.status(404).json({ error: "Post not found" });
+  }
+
+  // The owner can delete any post. Editors can delete their own drafts, since
+  // drafts are shared with the business now, but nothing else (F10).
+  const ownDraft = post.status === "draft" && post.authorId === req.user.id;
+  if (!can(req.membership.role, "post.delete") && !ownDraft) {
+    return res.status(403).json({
+      error: "You can delete your own drafts. Only the business owner can delete other posts.",
+      code: "FORBIDDEN",
+    });
   }
 
   await postModel.deleteOne({ _id: post.id });
@@ -786,14 +794,17 @@ async function batchCreate(req, res) {
 
       return {
         workspaceId: req.workspaceId,
-        ownerId: req.user.id,
+        authorId: req.user.id,
         channel: item.channel,
-        platforms: [item.channel],
-        title: item.title || `Post for ${item.channel}`,
-        body: item.body,
-        mediaUrls: item.mediaUrls || [],
-        hashtags: item.hashtags || [],
+        campaignId: item.campaignId || null,
+        content: {
+          title: item.title || `Post for ${item.channel}`,
+          body: item.body,
+          mediaUrls: item.mediaUrls || [],
+          hashtags: item.hashtags || [],
+        },
         status: "draft",
+        origin: "manual",
         aiMetadata: {
           ...(item.aiMetadata || {}),
           guardrails,
@@ -809,7 +820,8 @@ async function batchCreate(req, res) {
     })
   );
 
-  const createdDrafts = await contentDraftModel.createMany(itemsToInsert);
+  // Drafts live on the business's posts, so the whole team sees them (F10).
+  const createdDrafts = await postModel.createMany(itemsToInsert);
   return res.status(201).json({ items: createdDrafts });
 }
 
@@ -821,6 +833,7 @@ module.exports = {
   submitApproval,
   approve,
   requestChanges,
+  reject,
   publishNow,
   deletePost,
   getTopPerforming,
