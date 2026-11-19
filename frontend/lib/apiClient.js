@@ -7,6 +7,10 @@ const API_BASE_URL =
 // is retried once after it wakes), so the browser waits longer than usual.
 const WEBSITE_READ_TIMEOUT_MS = 25000;
 
+// Multi-model AI generation fans out to Groq, OpenRouter, and Gemini (up to
+// 14s) and then runs brand-guardrail tone checks on each returned candidate.
+const AI_TIMEOUT_MS = 35000;
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -98,6 +102,9 @@ apiClient.interceptors.response.use(
   async (error) => {
     // If backend is not running, provide graceful structured error
     if (!error.response) {
+      if (error.code === "ECONNABORTED" || /timeout/i.test(error.message || "")) {
+        return Promise.reject(new Error("The request timed out while waiting for the server"));
+      }
       return Promise.reject(new Error("Network connection to backend server failed"));
     }
 
@@ -211,8 +218,10 @@ export const api = {
     delete: (id) => apiClient.delete(`/posts/${id}`),
     getTopPerforming: ({ limit = 10, channel, metric = "engagement" } = {}) =>
       apiClient.get("/posts/top-performing", { params: { limit, channel, metric } }).then((r) => r.data),
-    generateVariants: (data) => apiClient.post("/posts/generate-variants", data).then((r) => r.data),
-    repurposePost: (id, data) => apiClient.post(`/posts/${id}/repurpose`, data).then((r) => r.data),
+    generateVariants: (data) =>
+      apiClient.post("/posts/generate-variants", data, { timeout: AI_TIMEOUT_MS }).then((r) => r.data),
+    repurposePost: (id, data) =>
+      apiClient.post(`/posts/${id}/repurpose`, data, { timeout: AI_TIMEOUT_MS }).then((r) => r.data),
     batchCreate: (posts) => apiClient.post("/posts/batch-create", { posts }).then((r) => r.data.items || []),
     submitApproval: (id, data = {}) => apiClient.post(`/posts/${id}/submit-approval`, data).then((r) => r.data),
     approve: (id, data = {}) => apiClient.post(`/posts/${id}/approve`, data).then((r) => r.data),
@@ -251,10 +260,14 @@ export const api = {
         }),
   },
   ai: {
-    generateCaption: (data) => apiClient.post("/ai/generate-caption", data).then((r) => r.data),
-    suggestHashtags: (data) => apiClient.post("/ai/suggest-hashtags", data).then((r) => r.data),
-    repurpose: (data) => apiClient.post("/ai/repurpose", data).then((r) => r.data),
-    generateVariants: (data) => apiClient.post("/posts/generate-variants", data).then((r) => r.data),
+    generateCaption: (data) =>
+      apiClient.post("/ai/generate-caption", data, { timeout: AI_TIMEOUT_MS }).then((r) => r.data),
+    suggestHashtags: (data) =>
+      apiClient.post("/ai/suggest-hashtags", data, { timeout: AI_TIMEOUT_MS }).then((r) => r.data),
+    repurpose: (data) =>
+      apiClient.post("/ai/repurpose", data, { timeout: AI_TIMEOUT_MS }).then((r) => r.data),
+    generateVariants: (data) =>
+      apiClient.post("/posts/generate-variants", data, { timeout: AI_TIMEOUT_MS }).then((r) => r.data),
   },
   guardrails: {
     checkDraft: (data) => apiClient.post("/guardrails/check-draft", data).then((r) => r.data),
