@@ -18,8 +18,18 @@ import {
 } from "./Icons";
 
 const META_ERROR_MESSAGES = {
-  no_facebook_page_found: "No Facebook Page was found for that account. You need to manage at least one Page, and it must belong to a Business Portfolio.",
+  no_facebook_page_found:
+    "No Facebook Page was found for that account. You need to manage at least one Page, and it must belong to a Business Portfolio.",
   oauth_failed: "Something went wrong completing the Meta login.",
+};
+
+const BLOCKER_SHORT_LABELS = {
+  no_facebook_page: "No Facebook Page",
+  missing_page_permissions: "Page Role Needed",
+  non_professional_ig: "Personal IG Account",
+  unlinked_ig: "Link IG to Page",
+  no_gbp_listing: "No GBP Listing",
+  unverified_gbp: "GBP Verification Needed",
 };
 
 const AVAILABLE_CHANNELS = [
@@ -65,8 +75,14 @@ export function SocialAccountsManager() {
     useAppStore();
   // Connecting accounts decides where posts go, so only the owner can (F10).
   const manages = can(currentWorkspace, "accounts.manage");
+  const viewerRole = currentWorkspace?.role || "viewer";
+  const canViewWalkthrough = manages || viewerRole === "editor";
+
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
+  const [walkthroughPlatform, setWalkthroughPlatform] = useState("facebook");
+  const [activeBlocker, setActiveBlocker] = useState(null);
+  const [progressByPlatform, setProgressByPlatform] = useState({});
   const [selectedChannel, setSelectedChannel] = useState("instagram");
   const [accountHandle, setAccountHandle] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -79,23 +95,59 @@ export function SocialAccountsManager() {
   const [metaPages, setMetaPages] = useState([]);
   const [connectingPageId, setConnectingPageId] = useState(null);
 
+  const activeWorkspaceId = currentWorkspace?.id || currentWorkspace?._id;
+
   useEffect(() => {
     // Wait for auth to be resolved so this doesn't fire before a restored
     // token is in place and 401 silently, leaving the page stuck on "Inactive".
-    if (authReady && user) loadAccounts();
-  }, [authReady, token, user]);
+    if (authReady && user) {
+      loadAccounts();
+      loadSetupProgress();
+    }
+  }, [authReady, token, user, activeWorkspaceId]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !manages) return;
+    if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get("walkthrough") === "1") {
+    const platParam = params.get("platform");
+    if (params.get("walkthrough") === "1" && canViewWalkthrough) {
+      if (platParam) setWalkthroughPlatform(platParam);
       setIsWalkthroughOpen(true);
-    } else if (params.get("connect") === "1") {
+    } else if (params.get("connect") === "1" && manages) {
+      if (platParam) setSelectedChannel(platParam);
       setIsConnectModalOpen(true);
     }
-  }, [manages]);
+  }, [manages, canViewWalkthrough]);
 
-  async function handleConnectWithMeta() {
+  function openWalkthroughFor(platform = "facebook", blockerReason = null) {
+    setWalkthroughPlatform(platform);
+    setActiveBlocker(blockerReason ? { platform, blockerReason } : null);
+    setIsWalkthroughOpen(true);
+  }
+
+  function handleProgressUpdated(platform, updatedProgress) {
+    setProgressByPlatform((prev) => ({
+      ...prev,
+      [platform]: updatedProgress,
+    }));
+  }
+
+  async function loadSetupProgress() {
+    try {
+      const data = await api.channelSetup.getProgress();
+      if (Array.isArray(data?.items)) {
+        const map = {};
+        for (const item of data.items) {
+          map[item.platform] = item;
+        }
+        setProgressByPlatform(map);
+      }
+    } catch (_err) {
+      // ignore
+    }
+  }
+
+  async function handleConnectWithMeta(targetPlat = selectedChannel) {
     // Channels belong to a business profile, so never start Meta's login signed out.
     if (!user) return setAuthModalOpen(true);
 
@@ -110,7 +162,7 @@ export function SocialAccountsManager() {
       FB.login(
         (response) => {
           if (response.authResponse?.accessToken) {
-            handleMetaLoginResponse(response.authResponse.accessToken);
+            handleMetaLoginResponse(response.authResponse.accessToken, targetPlat);
           } else {
             addToast("info", "Facebook login was cancelled.");
             setMetaConnecting(false);
@@ -124,21 +176,24 @@ export function SocialAccountsManager() {
     }
   }
 
-  async function handleMetaLoginResponse(accessToken) {
+  async function handleMetaLoginResponse(accessToken, targetPlat = selectedChannel) {
     try {
       const res = await api.auth.listMetaPages(accessToken);
       const pages = res.pages || [];
 
       // When no Page or professional account is found, hand off to the setup walkthrough (#08, F27)
       if (pages.length === 0 || res.handoff === "setup_walkthrough") {
+        if (res.progress) {
+          handleProgressUpdated("facebook", res.progress);
+        }
         setIsConnectModalOpen(false);
-        setIsWalkthroughOpen(true);
+        openWalkthroughFor("facebook", res.blockerReason || "no_facebook_page");
         addToast("info", "No Facebook Page found. Opening Setup Walkthrough (#08, F27)...");
         return;
       }
 
       if (pages.length === 1) {
-        await connectMetaPage(accessToken, pages[0].id);
+        await connectMetaPage(accessToken, pages[0].id, targetPlat);
         return;
       }
       // Multiple Pages — let the person pick instead of guessing.
@@ -146,9 +201,10 @@ export function SocialAccountsManager() {
       setMetaPages(pages);
     } catch (err) {
       const reason = err.response?.data?.error;
+      const blocker = err.response?.data?.blockerReason || "no_facebook_page";
       if (reason === "no_facebook_page_found" || err.response?.data?.handoff === "setup_walkthrough") {
         setIsConnectModalOpen(false);
-        setIsWalkthroughOpen(true);
+        openWalkthroughFor("facebook", blocker);
       }
       addToast("error", META_ERROR_MESSAGES[reason] || "Could not list your Facebook Pages");
     } finally {
@@ -156,20 +212,31 @@ export function SocialAccountsManager() {
     }
   }
 
-  async function connectMetaPage(accessToken, pageId) {
+  async function connectMetaPage(accessToken, pageId, targetPlat = selectedChannel) {
     setConnectingPageId(pageId);
     try {
-      const { connected } = await api.auth.connectMetaPage(accessToken, pageId);
+      const res = await api.auth.connectMetaPage(accessToken, pageId, targetPlat);
+      const connected = res.connected || [];
       addToast("success", `Connected via Meta: ${connected.join(", ")}`);
       setIsConnectModalOpen(false);
       setMetaAccessToken(null);
       setMetaPages([]);
-      loadAccounts();
+      await Promise.all([loadAccounts(), loadSetupProgress()]);
+
+      // If Facebook connected but Instagram wasn't linked/professional, guide the user through the IG walkthrough
+      if (res.instagramBlocker && (targetPlat === "instagram" || res.handoff === "setup_walkthrough")) {
+        openWalkthroughFor("instagram", res.instagramBlocker);
+        addToast(
+          "info",
+          "Facebook Page connected! Follow the Instagram walkthrough to link your Professional Instagram account."
+        );
+      }
     } catch (err) {
       const reason = err.response?.data?.error;
+      const blocker = err.response?.data?.blockerReason || "missing_page_permissions";
       if (reason === "no_facebook_page_found" || err.response?.data?.handoff === "setup_walkthrough") {
         setIsConnectModalOpen(false);
-        setIsWalkthroughOpen(true);
+        openWalkthroughFor("facebook", blocker);
       }
       addToast("error", META_ERROR_MESSAGES[reason] || "Could not complete Meta connection");
     } finally {
@@ -181,7 +248,7 @@ export function SocialAccountsManager() {
     try {
       const items = await api.socialAccounts.list();
       setSocialAccounts(items);
-    } catch (err) {
+    } catch (_err) {
       // ignore
     }
   }
@@ -199,6 +266,7 @@ export function SocialAccountsManager() {
       });
 
       setSocialAccounts([...socialAccounts, created]);
+      await loadSetupProgress();
       addToast("success", `Connected ${selectedChannel} account successfully!`);
       setIsConnectModalOpen(false);
       setAccountHandle("");
@@ -214,8 +282,9 @@ export function SocialAccountsManager() {
     try {
       await api.socialAccounts.unlink(id);
       setSocialAccounts(socialAccounts.filter((a) => a.id !== id));
+      await loadSetupProgress();
       addToast("info", `Disconnected ${name}`);
-    } catch (err) {
+    } catch (_err) {
       addToast("error", "Failed to disconnect channel");
     }
   }
@@ -245,23 +314,27 @@ export function SocialAccountsManager() {
           </p>
         </div>
 
-        {manages && (
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsWalkthroughOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white transition"
-          >
-            <span>Setup Walkthrough (#08)</span>
-          </button>
-          <button
-            onClick={() => setIsConnectModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
-          >
-            <PlusIcon className="w-4 h-4" />
-            <span>Connect New Channel</span>
-          </button>
+          {canViewWalkthrough && (
+            <button
+              type="button"
+              onClick={() => openWalkthroughFor("facebook")}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white transition"
+            >
+              <span>Setup Walkthrough (#08)</span>
+            </button>
+          )}
+          {manages && (
+            <button
+              type="button"
+              onClick={() => setIsConnectModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-md gradient-brand text-white text-xs font-semibold hover:opacity-95 transition"
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span>Connect New Channel</span>
+            </button>
+          )}
         </div>
-        )}
       </div>
 
       {/* Channel Cards Grid */}
@@ -271,6 +344,11 @@ export function SocialAccountsManager() {
           const connectedAccounts = socialAccounts.filter(
             (a) => a.platform === ch.platform || (ch.platform === "gbp" && a.platform === "google_business")
           );
+          const platProgress = progressByPlatform[ch.platform];
+          const isWaitingOnPlatform = platProgress?.status === "waiting_on_platform";
+          const hasBlocker = Boolean(platProgress?.blockerReason) && connectedAccounts.length === 0;
+          const isInProgress =
+            platProgress?.status === "in_progress" && connectedAccounts.length === 0 && !isWaitingOnPlatform;
 
           return (
             <div
@@ -278,7 +356,7 @@ export function SocialAccountsManager() {
               className="p-5 rounded-lg bg-slate-900/80 border border-slate-800 space-y-4 flex flex-col justify-between"
             >
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-3">
                     <span className={`p-2.5 rounded-md border ${ch.color}`}>
                       <Icon className="w-5 h-5" />
@@ -290,18 +368,60 @@ export function SocialAccountsManager() {
                   </div>
 
                   {connectedAccounts.length > 0 ? (
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold">
+                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold shrink-0">
                       <CheckIcon className="w-3.5 h-3.5" />
-                      <span>
-                        {connectedAccounts.length} Connected
-                      </span>
+                      <span>{connectedAccounts.length} Connected</span>
+                    </span>
+                  ) : isWaitingOnPlatform ? (
+                    <span className="px-2.5 py-1 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px] font-semibold shrink-0">
+                      ⏳ Waiting on Google
+                    </span>
+                  ) : hasBlocker ? (
+                    <span className="px-2.5 py-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 text-[11px] font-semibold shrink-0">
+                      ⚠️ {BLOCKER_SHORT_LABELS[platProgress.blockerReason] || "Setup Needed"}
+                    </span>
+                  ) : isInProgress ? (
+                    <span className="px-2.5 py-1 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold shrink-0">
+                      Step {platProgress.currentStep} in progress
                     </span>
                   ) : (
-                    <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-400 text-[11px] font-semibold">
+                    <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-400 text-[11px] font-semibold shrink-0">
                       Inactive
                     </span>
                   )}
                 </div>
+
+                {/* Saved Walkthrough Progress Callout when not connected */}
+                {connectedAccounts.length === 0 && (isWaitingOnPlatform || hasBlocker || isInProgress) && (
+                  <div
+                    className={`p-3 rounded-md border text-xs flex items-center justify-between gap-2 ${
+                      isWaitingOnPlatform
+                        ? "bg-amber-500/10 border-amber-500/25 text-amber-200"
+                        : hasBlocker
+                        ? "bg-rose-500/10 border-rose-500/25 text-rose-200"
+                        : "bg-slate-950 border-slate-800 text-slate-300"
+                    }`}
+                  >
+                    <span className="text-[11px] leading-snug">
+                      {isWaitingOnPlatform
+                        ? `Saved at Step ${platProgress.currentStep} — awaiting Google verification review (3–5 business days).`
+                        : hasBlocker
+                        ? `Blocker detected at Step ${platProgress.currentStep}: ${
+                            BLOCKER_SHORT_LABELS[platProgress.blockerReason] || platProgress.blockerReason
+                          }.`
+                        : `Walkthrough saved at Step ${platProgress.currentStep}.`}
+                    </span>
+                    {canViewWalkthrough && (
+                      <button
+                        type="button"
+                        onClick={() => openWalkthroughFor(ch.platform, platProgress?.blockerReason)}
+                        className="text-[11px] font-bold underline underline-offset-2 shrink-0 hover:text-white"
+                      >
+                        Resume →
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {connectedAccounts.length > 0 && (
                   <div className="space-y-2">
@@ -335,10 +455,25 @@ export function SocialAccountsManager() {
                 )}
               </div>
 
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                <span className="text-[11px] text-slate-500">
-                  {connectedAccounts.length > 0 ? "Ready for automated publish" : "Not linked yet"}
-                </span>
+              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-500">
+                    {connectedAccounts.length > 0
+                      ? "Ready for automated publish"
+                      : isWaitingOnPlatform
+                      ? "Awaiting platform review"
+                      : "Not linked yet"}
+                  </span>
+                  {canViewWalkthrough && connectedAccounts.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => openWalkthroughFor(ch.platform, platProgress?.blockerReason)}
+                      className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold"
+                    >
+                      Setup Guide
+                    </button>
+                  )}
+                </div>
                 {manages && (
                   <button
                     onClick={() => {
@@ -366,6 +501,7 @@ export function SocialAccountsManager() {
                 setMetaAccessToken(null);
                 setMetaPages([]);
               }}
+              aria-label="Close connect channel modal"
               className="absolute top-4 right-4 text-slate-400 hover:text-white"
             >
               ✕
@@ -388,7 +524,7 @@ export function SocialAccountsManager() {
                       <button
                         key={page.id}
                         type="button"
-                        onClick={() => connectMetaPage(metaAccessToken, page.id)}
+                        onClick={() => connectMetaPage(metaAccessToken, page.id, selectedChannel)}
                         disabled={connectingPageId !== null}
                         className="w-full flex items-center justify-between px-4 py-3 rounded-md bg-slate-950 border border-slate-800 hover:border-indigo-500/50 text-left transition disabled:opacity-60"
                       >
@@ -410,8 +546,8 @@ export function SocialAccountsManager() {
                           {connectingPageId === page.id
                             ? "Connecting..."
                             : alreadyConnected
-                              ? "Refresh token"
-                              : "Connect"}
+                            ? "Refresh token"
+                            : "Connect"}
                         </span>
                       </button>
                     );
@@ -436,15 +572,39 @@ export function SocialAccountsManager() {
                   Authorize publishing access for multi-platform scheduling.
                 </p>
 
-                <button
-                  type="button"
-                  onClick={handleConnectWithMeta}
-                  disabled={metaConnecting}
-                  className="w-full mb-4 py-2.5 px-4 rounded-md bg-[#1877F2] hover:bg-[#1567d6] text-white text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-60"
-                >
-                  <FacebookIcon className="w-4 h-4" />
-                  <span>{metaConnecting ? "Waiting for Facebook..." : "Connect with Facebook (Meta OAuth)"}</span>
-                </button>
+                {selectedChannel === "gbp" ? (
+                  <div className="mb-4 p-3 rounded-md bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 space-y-2">
+                    <div className="font-semibold">
+                      Google Business Profile requires a verified listing
+                    </div>
+                    <p className="text-[11px] text-slate-300">
+                      Don&apos;t have a verified Google listing yet? Follow our step-by-step walkthrough
+                      (video verification typically takes 3–5 business days).
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsConnectModalOpen(false);
+                        openWalkthroughFor("gbp", "unverified_gbp");
+                      }}
+                      className="w-full py-2 px-3 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold transition"
+                    >
+                      Open GBP Verification Walkthrough (#08)
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleConnectWithMeta(selectedChannel)}
+                    disabled={metaConnecting}
+                    className="w-full mb-4 py-2.5 px-4 rounded-md bg-[#1877F2] hover:bg-[#1567d6] text-white text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-60"
+                  >
+                    <FacebookIcon className="w-4 h-4" />
+                    <span>
+                      {metaConnecting ? "Waiting for Facebook..." : "Connect with Facebook (Meta OAuth)"}
+                    </span>
+                  </button>
+                )}
 
                 <div className="flex items-center my-3 text-slate-600 text-xs">
                   <div className="flex-1 border-t border-slate-800" />
@@ -517,12 +677,20 @@ export function SocialAccountsManager() {
       <SetupWalkthroughModal
         isOpen={isWalkthroughOpen}
         onClose={() => setIsWalkthroughOpen(false)}
-        onRetryConnect={() => {
+        initialPlatform={walkthroughPlatform}
+        activeBlocker={activeBlocker}
+        progressByPlatform={progressByPlatform}
+        onProgressUpdated={handleProgressUpdated}
+        canManage={manages}
+        viewerRole={viewerRole}
+        onRetryConnect={(plat) => {
           setIsWalkthroughOpen(false);
-          handleConnectWithMeta();
+          if (plat) setSelectedChannel(plat);
+          handleConnectWithMeta(plat || selectedChannel);
         }}
-        onUseSandbox={() => {
+        onUseSandbox={(plat) => {
           setIsWalkthroughOpen(false);
+          if (plat) setSelectedChannel(plat);
           setIsConnectModalOpen(true);
         }}
       />

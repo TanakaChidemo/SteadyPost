@@ -26,7 +26,7 @@ router.post("/connect-mock", ...canManageAccounts, authController.connectMockAcc
 // (FB.login with a Business Login config_id) and posts the resulting User
 // Access Token here — see frontend/lib/facebookSdk.js for why. Listing and
 // connecting are separate steps so the user can pick which Page to use.
-router.post("/oauth/meta/pages", requireAuth, authController.listMetaPages);
+router.post("/oauth/meta/pages", ...canManageAccounts, authController.listMetaPages);
 router.post("/oauth/meta/connect", ...canManageAccounts, authController.connectMetaPage);
 router.get("/oauth/linkedin", requireAuth, authController.notImplemented);
 router.get("/oauth/twitter", requireAuth, authController.notImplemented);

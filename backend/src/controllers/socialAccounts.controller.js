@@ -1,4 +1,5 @@
 const socialAccountModel = require("../models/socialAccount.model");
+const { recordDetectedState } = require("./channelSetup.controller");
 
 // Page/IG access tokens are sensitive Graph API credentials — never ship them
 // to the browser. The frontend only needs to know whether an account is a
@@ -28,6 +29,17 @@ async function link(req, res) {
     displayName: name,
     linkedBy: req.user.id,
   });
+
+  const normalizedPlatform = platform === "google_business" ? "gbp" : platform;
+  if (req.workspaceId && ["facebook", "instagram", "gbp", "linkedin", "twitter"].includes(normalizedPlatform)) {
+    await recordDetectedState({
+      workspaceId: req.workspaceId,
+      userId: req.user.id,
+      platform: normalizedPlatform,
+      blockerReason: null,
+      status: "done",
+    });
+  }
 
   return res.status(201).json(toClientAccount(account));
 }

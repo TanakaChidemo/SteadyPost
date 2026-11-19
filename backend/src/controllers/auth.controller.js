@@ -8,6 +8,7 @@ const membershipModel = require("../models/membership.model");
 const businessProfileModel = require("../models/businessProfile.model");
 const notificationSettingsModel = require("../models/notificationSettings.model");
 const socialAccountModel = require("../models/socialAccount.model");
+const { recordDetectedState } = require("./channelSetup.controller");
 const logger = require("../config/logger");
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "changeme_access_secret";
@@ -377,25 +378,25 @@ async function listMetaPages(req, res) {
     return res.status(400).json({ error: "accessToken is required" });
   }
 
+  const targetWorkspaceId = req.workspaceId || req.user?.activeWorkspaceId || null;
+
   try {
     const pages = await findAccessiblePages(accessToken);
     if (!pages || pages.length === 0) {
+      const { progress, walkthrough } = await recordDetectedState({
+        workspaceId: targetWorkspaceId,
+        userId: req.user?.id,
+        platform: "facebook",
+        blockerReason: "no_facebook_page",
+        status: "in_progress",
+      });
+
       return res.json({
         pages: [],
         handoff: "setup_walkthrough",
-        walkthrough: {
-          feature: "F27",
-          specNumber: "#08",
-          step: "no_pages_found",
-          title: "No Facebook Page or Professional Account Found",
-          message: "Meta requires a Facebook Business Page or Instagram Professional Account connected to a Business Portfolio.",
-          checklist: [
-            "Create a Facebook Business Page for your brand or venture.",
-            "Switch your Instagram profile to a Professional / Business account.",
-            "Link your Instagram Professional account to your Facebook Page in Meta Business Suite.",
-            "Ensure you have full management access in Meta Business Suite.",
-          ],
-        },
+        blockerReason: "no_facebook_page",
+        progress,
+        walkthrough,
       });
     }
 
@@ -413,31 +414,36 @@ async function listMetaPages(req, res) {
 // the JWT, so there's no need for a signed-state round trip a redirect-based
 // flow would otherwise need.
 async function connectMetaPage(req, res) {
-  const { accessToken, pageId } = req.body;
+  const { accessToken, pageId, targetPlatform } = req.body;
   if (!accessToken || !pageId) {
     return res.status(400).json({ error: "accessToken and pageId are required" });
   }
 
+  const targetWorkspaceId = req.workspaceId || req.user.activeWorkspaceId || null;
+
   try {
     const pageRes = await fetch(
-      `${META_GRAPH_API_BASE}/${pageId}?fields=id,name,access_token,instagram_business_account{id,username}&access_token=${encodeURIComponent(accessToken)}`
+      `${META_GRAPH_API_BASE}/${pageId}?fields=id,name,access_token,instagram_business_account{id,username},connected_instagram_account{id,username}&access_token=${encodeURIComponent(accessToken)}`
     );
     const page = await pageRes.json();
     logger.info({ status: pageRes.status, pageId: page.id }, "Meta Page connect lookup");
     if (!pageRes.ok || !page.access_token) {
+      const { progress, walkthrough } = await recordDetectedState({
+        workspaceId: targetWorkspaceId,
+        userId: req.user?.id,
+        platform: "facebook",
+        blockerReason: "missing_page_permissions",
+        status: "in_progress",
+      });
+
       return res.status(422).json({
         error: "no_facebook_page_found",
+        blockerReason: "missing_page_permissions",
         handoff: "setup_walkthrough",
-        walkthrough: {
-          feature: "F27",
-          specNumber: "#08",
-          title: "No Facebook Page Found or Missing Permissions",
-          message: "Could not retrieve Page access token. Please follow the setup walkthrough (#08, F27).",
-        },
+        progress,
+        walkthrough,
       });
     }
-
-    const targetWorkspaceId = req.workspaceId || req.user.activeWorkspaceId || null;
 
     await socialAccountModel.create({
       workspaceId: targetWorkspaceId,
@@ -447,6 +453,14 @@ async function connectMetaPage(req, res) {
       displayName: page.name || "Connected Facebook Page",
       accessToken: page.access_token,
       linkedBy: req.user.id,
+    });
+
+    await recordDetectedState({
+      workspaceId: targetWorkspaceId,
+      userId: req.user.id,
+      platform: "facebook",
+      blockerReason: null,
+      status: "done",
     });
 
     const igAccount = page.instagram_business_account;
@@ -460,9 +474,45 @@ async function connectMetaPage(req, res) {
         accessToken: page.access_token,
         linkedBy: req.user.id,
       });
+
+      await recordDetectedState({
+        workspaceId: targetWorkspaceId,
+        userId: req.user.id,
+        platform: "instagram",
+        blockerReason: null,
+        status: "done",
+      });
+
+      return res.json({ connected: ["facebook", "instagram"] });
     }
 
-    return res.json({ connected: igAccount ? ["facebook", "instagram"] : ["facebook"] });
+    // No Instagram Professional account returned on the Page — detect whether
+    // a personal/non-professional IG account is attached vs. unlinked IG.
+    const igBlocker =
+      page.connected_instagram_account || page.has_non_professional_ig
+        ? "non_professional_ig"
+        : "unlinked_ig";
+
+    const { progress: igProgress, walkthrough: igWalkthrough } = await recordDetectedState({
+      workspaceId: targetWorkspaceId,
+      userId: req.user.id,
+      platform: "instagram",
+      blockerReason: igBlocker,
+      status: "in_progress",
+    });
+
+    return res.json({
+      connected: ["facebook"],
+      instagramBlocker: igBlocker,
+      instagramProgress: igProgress,
+      instagramWalkthrough: igWalkthrough,
+      ...(targetPlatform === "instagram"
+        ? {
+            handoff: "setup_walkthrough",
+            walkthrough: igWalkthrough,
+          }
+        : {}),
+    });
   } catch (err) {
     logger.error({ err: err.message }, "Meta Page connect failed");
     return res.status(502).json({ error: "oauth_failed" });
@@ -485,6 +535,17 @@ async function connectMockAccount(req, res) {
     displayName: name,
     linkedBy: req.user.id,
   });
+
+  const normalizedPlatform = platform === "google_business" ? "gbp" : platform;
+  if (["facebook", "instagram", "gbp", "linkedin", "twitter"].includes(normalizedPlatform)) {
+    await recordDetectedState({
+      workspaceId: targetWorkspaceId,
+      userId: req.user.id,
+      platform: normalizedPlatform,
+      blockerReason: null,
+      status: "done",
+    });
+  }
 
   return res.status(201).json(account);
 }

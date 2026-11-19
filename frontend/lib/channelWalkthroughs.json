@@ -1,0 +1,431 @@
+{
+  "version": "2.0",
+  "platforms": {
+    "facebook": {
+      "platform": "facebook",
+      "name": "Facebook Page",
+      "shortName": "Facebook",
+      "lastChecked": "2026-11-18",
+      "whyNeeded": "Third-party tools can only publish to a Facebook Page, not a personal profile — Facebook removed personal profile publishing from its API in 2018. You need a Business Page and full (admin) control of it.",
+      "delegation": {
+        "ownerRoleRequired": true,
+        "summary": "A helper with the Editor role usually can't create the business Page or authorize SteadyPost. The Business Owner must create the Page and connect it.",
+        "howToDelegate": "If you want your helper to manage the Page on Facebook too, open Meta Business Suite → Settings → People, add your helper, and grant 'Create content' and 'View insights' (or Full Control).",
+        "delegateLinkText": "Manage Page Roles in Meta Business Suite",
+        "delegateLinkUrl": "https://business.facebook.com/latest/settings/people"
+      },
+      "references": [
+        {
+          "label": "Create a Facebook Page",
+          "url": "https://www.facebook.com/pages/create"
+        },
+        {
+          "label": "Meta Business Suite People & Permissions",
+          "url": "https://business.facebook.com/latest/settings/people"
+        }
+      ],
+      "blockerMessages": {
+        "no_facebook_page": "Meta returned zero Facebook Pages for your account. Facebook only allows tools like SteadyPost to publish to a Business Page, not a personal profile.",
+        "missing_page_permissions": "We found your Facebook Page, but Meta did not return a publishing token. Make sure your Facebook account has Full Control (Admin) or 'Create content' access on the Page."
+      },
+      "steps": [
+        {
+          "number": 1,
+          "id": "fb_create_page",
+          "title": "Create a Facebook Business Page",
+          "badge": "Required",
+          "who": "Owner",
+          "blockerCodes": ["no_facebook_page"],
+          "description": "Facebook removed personal profile publishing in 2018. Create a public Page representing your business or venture.",
+          "instructions": [
+            "Open Facebook Page creation using the link below while signed into your personal Facebook account.",
+            "Enter your business or venture name and pick up to 3 categories (e.g., Local Business, Restaurant, Consultant).",
+            "Add your short bio, website, and business hours, then click 'Create Page'.",
+            "Ensure the Page status is Published (not unpublished or age/country restricted)."
+          ],
+          "linkText": "Open Facebook Page Creation",
+          "linkUrl": "https://www.facebook.com/pages/create"
+        },
+        {
+          "number": 2,
+          "id": "fb_business_portfolio",
+          "title": "Check Meta Business Suite Ownership",
+          "badge": "Access",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "If your Page belongs to a Meta Business Portfolio, make sure your personal login is assigned to that Page.",
+          "instructions": [
+            "Open Meta Business Suite → Settings → Pages.",
+            "Confirm your Page appears under your Business Portfolio (or under your personal Pages).",
+            "Click on the Page and verify your name is listed under 'Assigned People'."
+          ],
+          "linkText": "Open Meta Business Suite Pages",
+          "linkUrl": "https://business.facebook.com/latest/settings/pages"
+        },
+        {
+          "number": 3,
+          "id": "fb_verify_permissions",
+          "title": "Confirm Full Control or Publishing Role",
+          "badge": "Permissions",
+          "who": "Owner",
+          "blockerCodes": ["missing_page_permissions"],
+          "description": "SteadyPost needs 'Create content' and 'View insights' permissions on the Page—or Full Control (Admin)—to obtain a Page token.",
+          "instructions": [
+            "In Meta Business Suite, go to Settings → People.",
+            "Select your account and click your Page under Assigned Assets.",
+            "Turn on 'Content' (Create, manage or delete posts) and 'Insights', or enable 'Full control', then Save.",
+            "Optional delegation: To let an Editor helper manage the Page on Facebook, invite them here as well."
+          ],
+          "linkText": "Open Meta Business Suite People Settings",
+          "linkUrl": "https://business.facebook.com/latest/settings/people"
+        },
+        {
+          "number": 4,
+          "id": "fb_reconnect_check",
+          "title": "Select Your Page in the Meta Login Picker",
+          "badge": "Ready to Connect",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "Re-run the Meta login check and make sure your new Page is ticked in Facebook's permission dialog.",
+          "instructions": [
+            "Click 'Done — check again' below to reopen Facebook Login.",
+            "When Facebook asks which Pages to grant SteadyPost access to, make sure your new Page is checked.",
+            "Keep any previously connected Pages checked too so Meta doesn't revoke their access."
+          ],
+          "linkText": "Facebook Help: Manage Business App Permissions",
+          "linkUrl": "https://www.facebook.com/settings?tab=business_tools"
+        }
+      ]
+    },
+    "instagram": {
+      "platform": "instagram",
+      "name": "Instagram Professional",
+      "shortName": "Instagram",
+      "lastChecked": "2026-11-18",
+      "whyNeeded": "Instagram publishing only works for a Professional account (Business or Creator). Switching from a personal account is free and reversible in Instagram settings. With the Facebook Login method SteadyPost uses, your Instagram account must also be linked to a Facebook Page you manage.",
+      "openDecisionNote": "Architecture note: Meta also offers a standalone Instagram Login path that doesn't require a Facebook Page. Supporting it for Instagram-only businesses is tracked as an open product decision.",
+      "delegation": {
+        "ownerRoleRequired": true,
+        "summary": "Only the Business Owner can switch the Instagram account to Professional, link it to the Facebook Page, and connect it in SteadyPost.",
+        "howToDelegate": "Once the Owner links Instagram to the Facebook Page and connects it here, Editors in this workspace can draft Instagram posts and submit them for Owner approval without needing the Instagram password.",
+        "delegateLinkText": "Meta Guide: Link Instagram to a Facebook Page",
+        "delegateLinkUrl": "https://business.facebook.com/latest/settings/connected_accounts"
+      },
+      "references": [
+        {
+          "label": "Instagram Platform overview",
+          "url": "https://developers.facebook.com/documentation/instagram-platform/overview"
+        },
+        {
+          "label": "Instagram content publishing",
+          "url": "https://developers.facebook.com/docs/instagram-platform/content-publishing"
+        }
+      ],
+      "blockerMessages": {
+        "non_professional_ig": "Your Instagram account is still set to a Personal profile. Meta's publishing API only works with Instagram Professional (Business or Creator) accounts.",
+        "unlinked_ig": "Your Facebook Page is connected, but no Instagram Professional account is linked to that Page yet. Link your Instagram Professional account to your Facebook Page so SteadyPost can publish to it."
+      },
+      "steps": [
+        {
+          "number": 1,
+          "id": "ig_switch_professional",
+          "title": "Switch Instagram to a Professional Account",
+          "badge": "Free & Reversible",
+          "who": "Owner",
+          "blockerCodes": ["non_professional_ig"],
+          "description": "Personal Instagram accounts cannot publish through the Graph API. Switching to a Business or Creator account is free and can be reversed anytime.",
+          "instructions": [
+            "Log into Instagram and go to Settings and activity → Account type and tools.",
+            "Select 'Switch to professional account' and click Continue.",
+            "Choose a category for your business and pick 'Business' (recommended for local businesses/brands) or 'Creator'.",
+            "Review your contact info or skip to finish switching."
+          ],
+          "linkText": "Official Instagram Guide: Switch to Professional",
+          "linkUrl": "https://help.instagram.com/502981923235522"
+        },
+        {
+          "number": 2,
+          "id": "ig_link_facebook_page",
+          "title": "Link Instagram to Your Facebook Page",
+          "badge": "Crucial Step",
+          "who": "Owner",
+          "blockerCodes": ["unlinked_ig"],
+          "description": "Because SteadyPost authenticates through Facebook Login, your Instagram Professional account must be connected to the Facebook Page you manage.",
+          "instructions": [
+            "Open Meta Business Suite → Settings → Connected accounts (or your Facebook Page → Settings → Linked accounts).",
+            "Select Instagram and click 'Connect account'.",
+            "Log in with your Instagram Professional account credentials when prompted.",
+            "Confirm that the Instagram handle now shows as linked to your Facebook Page."
+          ],
+          "linkText": "Open Meta Business Suite Connected Accounts",
+          "linkUrl": "https://business.facebook.com/latest/settings/connected_accounts"
+        },
+        {
+          "number": 3,
+          "id": "ig_publishing_auth",
+          "title": "Check Page Publishing Authorization (If Prompted)",
+          "badge": "Verification",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "Some Facebook Pages require Meta's Page Publishing Authorization (two-factor authentication & primary country confirmation) before posts can go live.",
+          "instructions": [
+            "Ensure Two-Factor Authentication is turned on for your Facebook account if your Page has high reach or runs promotions.",
+            "If Facebook shows a 'Page Publishing Authorization' banner on your Page, complete the identity confirmation step.",
+            "Review Meta's Instagram content publishing requirements if a post is rejected."
+          ],
+          "linkText": "Meta Docs: Instagram Content Publishing",
+          "linkUrl": "https://developers.facebook.com/docs/instagram-platform/content-publishing"
+        },
+        {
+          "number": 4,
+          "id": "ig_reconnect_check",
+          "title": "Re-check & Connect Instagram",
+          "badge": "Ready to Connect",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "Once your Instagram Professional account is linked to your Facebook Page, click 'Done — check again' so SteadyPost detects and saves both accounts.",
+          "instructions": [
+            "Click 'Done — check again' below to re-run Meta detection.",
+            "In the Facebook Login dialog, make sure both your Facebook Page and your Instagram Business account are selected.",
+            "Pick your Page in SteadyPost—both your Facebook Page and @instagram handle will be linked automatically."
+          ],
+          "linkText": "Meta Docs: Instagram Platform Overview",
+          "linkUrl": "https://developers.facebook.com/documentation/instagram-platform/overview"
+        }
+      ]
+    },
+    "gbp": {
+      "platform": "gbp",
+      "name": "Google Business Profile",
+      "shortName": "Google Business",
+      "lastChecked": "2026-11-18",
+      "whyNeeded": "To publish Google Business Profile Local Posts (updates, offers, events), your business needs a claimed and verified listing on Google. Google now most commonly requires a continuous, unedited video verification, which takes several business days for Google to review.",
+      "delegation": {
+        "ownerRoleRequired": true,
+        "summary": "A helper with the Editor role usually can't verify Google Business Profile for the owner, because Google's video verification must be filmed on-site showing proof of management.",
+        "howToDelegate": "Once the Owner claims or verifies the listing, open your Business Profile on Google → Menu (⋮) → Business Profile settings → People and access → Add, and invite your helper as a Manager.",
+        "delegateLinkText": "Google Help: Add Owners & Managers to GBP",
+        "delegateLinkUrl": "https://support.google.com/business/answer/3403100"
+      },
+      "references": [
+        {
+          "label": "GBP verification guide (BrightLocal)",
+          "url": "https://www.brightlocal.com/learn/google-business-profile/getting-started/verifying-google-business-profile/"
+        },
+        {
+          "label": "Google Business Profile Manager",
+          "url": "https://www.google.com/business/"
+        }
+      ],
+      "blockerMessages": {
+        "no_gbp_listing": "No Google Business Profile location was found for this account. Search for an existing listing to claim first, or create a new one.",
+        "unverified_gbp": "Your Google Business Profile listing is not verified yet. Google requires verification (usually a short continuous video) before Local Posts can be published. Review takes several business days—waiting on Google is normal, not an error."
+      },
+      "steps": [
+        {
+          "number": 1,
+          "id": "gbp_search_existing",
+          "title": "Search for an Existing Listing First",
+          "badge": "Avoid Duplicates",
+          "who": "Owner",
+          "blockerCodes": ["no_gbp_listing"],
+          "description": "Before creating a new profile, always search Google Maps or Google Business Profile first—creating a duplicate delays verification.",
+          "instructions": [
+            "Open Google Business Profile Manager using the link below and sign in with your business Google account.",
+            "Type your exact business name and city to see if a listing already exists on Google Maps.",
+            "If your business appears, select it and click 'Claim this business' / 'Own this business?'.",
+            "Only click 'Add your business to Google' if no listing exists yet."
+          ],
+          "linkText": "Open Google Business Profile",
+          "linkUrl": "https://www.google.com/business/"
+        },
+        {
+          "number": 2,
+          "id": "gbp_complete_details",
+          "title": "Enter Category, Location & Contact Info",
+          "badge": "Setup",
+          "who": "Owner or Editor",
+          "blockerCodes": [],
+          "description": "Fill in your primary business category, service area or storefront address, phone number, and website.",
+          "instructions": [
+            "Choose the most specific primary category that describes your core offer.",
+            "Enter your storefront address (if customers visit you) or service area (if you visit customers).",
+            "Add your business phone number and website URL so they match your SteadyPost Business Profile."
+          ],
+          "linkText": "Google Business Profile Create / Claim",
+          "linkUrl": "https://business.google.com/create"
+        },
+        {
+          "number": 3,
+          "id": "gbp_verify_listing",
+          "title": "Verify Your Listing (Video Review Takes 3–5 Business Days)",
+          "badge": "Verification",
+          "who": "Owner",
+          "blockerCodes": ["unverified_gbp"],
+          "supportsWaitingState": true,
+          "description": "Google picks the verification method. A continuous, unedited video recorded on your phone is now the most common method, and Google's review usually takes up to 5 business days.",
+          "instructions": [
+            "Plan a single continuous, unedited 1–2 minute video on your phone showing: (1) street sign or nearby businesses, (2) your storefront/signage or branded vehicle/equipment, and (3) proof of management (unlocking the door, POS system, or business documents).",
+            "Avoid showing people's faces or sensitive bank/ID numbers in the video.",
+            "Submit the video in Google Business Profile.",
+            "Click 'Mark as Waiting on Google' below—SteadyPost will save your place while Google reviews your video (several business days is completely normal)."
+          ],
+          "linkText": "Read the GBP Verification Guide (BrightLocal)",
+          "linkUrl": "https://www.brightlocal.com/learn/google-business-profile/getting-started/verifying-google-business-profile/"
+        },
+        {
+          "number": 4,
+          "id": "gbp_check_verified",
+          "title": "Confirm Verification & Connect Location",
+          "badge": "Ready to Connect",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "Once Google emails you that your Business Profile is verified, return here and click 'Done — check again'.",
+          "instructions": [
+            "Open Google Business Profile Locations to confirm your status shows 'Verified'.",
+            "Return to SteadyPost and click 'Done — check again' to re-check your listing.",
+            "While waiting for Google verification or API allowlisting, you can also link a GBP Sandbox account to test Local Posts (Standard, Event, Offer, Alert)."
+          ],
+          "linkText": "Check Verification Status on Google",
+          "linkUrl": "https://business.google.com/locations"
+        }
+      ]
+    },
+    "linkedin": {
+      "platform": "linkedin",
+      "name": "LinkedIn Page / Profile",
+      "shortName": "LinkedIn",
+      "lastChecked": "2026-11-18",
+      "isFutureWork": true,
+      "whyNeeded": "LinkedIn publishing supports personal profiles and LinkedIn Company Pages (where you are a Super Admin or Content Admin). Planned under Icebox FW06.",
+      "delegation": {
+        "ownerRoleRequired": true,
+        "summary": "Only a LinkedIn Company Page Super Admin or Content Admin can authorize third-party publishing.",
+        "howToDelegate": "On your LinkedIn Company Page, go to Settings → Manage admins and add your teammate as a Content Admin.",
+        "delegateLinkText": "LinkedIn Help: Manage Page Admins",
+        "delegateLinkUrl": "https://www.linkedin.com/help/linkedin/answer/a541985"
+      },
+      "references": [
+        {
+          "label": "Create a LinkedIn Page",
+          "url": "https://www.linkedin.com/company/setup/new/"
+        }
+      ],
+      "blockerMessages": {},
+      "steps": [
+        {
+          "number": 1,
+          "id": "li_create_page",
+          "title": "Create a LinkedIn Company Page",
+          "badge": "FW06 Slot",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "Create a LinkedIn Page for your company or venture if you want to publish brand updates alongside personal posts.",
+          "instructions": [
+            "Open LinkedIn Page setup and choose Company or Showcase Page.",
+            "Enter your organization name, public LinkedIn URL, and website.",
+            "Upload your logo and tagline, then click Create page."
+          ],
+          "linkText": "Create a LinkedIn Company Page",
+          "linkUrl": "https://www.linkedin.com/company/setup/new/"
+        },
+        {
+          "number": 2,
+          "id": "li_admin_role",
+          "title": "Confirm Super Admin or Content Admin Access",
+          "badge": "Permissions",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "LinkedIn requires Super Admin or Content Admin permissions on the Company Page to publish via API.",
+          "instructions": [
+            "Open your LinkedIn Page admin view → Settings → Manage admins.",
+            "Confirm your LinkedIn profile is listed as Super Admin or Content Admin."
+          ],
+          "linkText": "LinkedIn Help: Company Page Admin Roles",
+          "linkUrl": "https://www.linkedin.com/help/linkedin/answer/a541985"
+        },
+        {
+          "number": 3,
+          "id": "li_sandbox_connect",
+          "title": "Connect via Sandbox (Live OAuth in FW06)",
+          "badge": "Sandbox Available",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "Live LinkedIn OAuth is tracked in Icebox FW06. You can link a LinkedIn Sandbox account today to test drafting and scheduling.",
+          "instructions": [
+            "Click 'Use Sandbox Mode' below and select LinkedIn to link a demo account for your workspace."
+          ],
+          "linkText": "LinkedIn Marketing Developer Docs",
+          "linkUrl": "https://learn.microsoft.com/en-us/linkedin/marketing/"
+        }
+      ]
+    },
+    "twitter": {
+      "platform": "twitter",
+      "name": "X (Twitter) Account",
+      "shortName": "X / Twitter",
+      "lastChecked": "2026-11-18",
+      "isFutureWork": true,
+      "whyNeeded": "Publishing to X uses OAuth 2.0 with write permissions on your business X account. Planned under Icebox FW06.",
+      "delegation": {
+        "ownerRoleRequired": true,
+        "summary": "The Business Owner must authorize the X account once; Editors can then draft 280-character posts for approval.",
+        "howToDelegate": "Keep X login credentials with the Owner and add helpers as Editors inside your SteadyPost workspace.",
+        "delegateLinkText": "X Help: Account Security & Apps",
+        "delegateLinkUrl": "https://help.x.com/en/managing-your-account/connect-or-revoke-access-to-third-party-apps"
+      },
+      "references": [
+        {
+          "label": "X Third-Party App Access Help",
+          "url": "https://help.x.com/en/managing-your-account/connect-or-revoke-access-to-third-party-apps"
+        }
+      ],
+      "blockerMessages": {},
+      "steps": [
+        {
+          "number": 1,
+          "id": "tw_verify_account",
+          "title": "Prepare Your Business X Account",
+          "badge": "FW06 Slot",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "Ensure your X account has a verified email/phone and completed bio before authorizing third-party posting.",
+          "instructions": [
+            "Sign into X with your business handle.",
+            "Complete your profile bio, avatar, and website link."
+          ],
+          "linkText": "Open X Account Settings",
+          "linkUrl": "https://x.com/settings/account"
+        },
+        {
+          "number": 2,
+          "id": "tw_app_permissions",
+          "title": "Enable Read and Write App Permissions",
+          "badge": "Permissions",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "X requires OAuth 2.0 PKCE with tweet.read and tweet.write scopes.",
+          "instructions": [
+            "When prompted during OAuth, grant Read and Write access so SteadyPost can publish approved posts."
+          ],
+          "linkText": "X Help: Third-Party App Access",
+          "linkUrl": "https://help.x.com/en/managing-your-account/connect-or-revoke-access-to-third-party-apps"
+        },
+        {
+          "number": 3,
+          "id": "tw_sandbox_connect",
+          "title": "Connect via Sandbox (Live OAuth in FW06)",
+          "badge": "Sandbox Available",
+          "who": "Owner",
+          "blockerCodes": [],
+          "description": "Live X OAuth is tracked in Icebox FW06. Link a Sandbox X account today to test 280-character adaptation and scheduling.",
+          "instructions": [
+            "Click 'Use Sandbox Mode' below and choose Twitter / X."
+          ],
+          "linkText": "X Developer Platform Docs",
+          "linkUrl": "https://developer.x.com/en/docs/x-api"
+        }
+      ]
+    }
+  }
+}
