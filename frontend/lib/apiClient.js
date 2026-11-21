@@ -139,8 +139,10 @@ export const api = {
     // back from FB.login() with a Business Login config_id — not our own JWT.
     listMetaPages: (accessToken) =>
       apiClient.post("/auth/oauth/meta/pages", { accessToken }).then((r) => r.data),
-    connectMetaPage: (accessToken, pageId) =>
-      apiClient.post("/auth/oauth/meta/connect", { accessToken, pageId }).then((r) => r.data),
+    connectMetaPage: (accessToken, pageId, targetPlatform) =>
+      apiClient
+        .post("/auth/oauth/meta/connect", { accessToken, pageId, targetPlatform })
+        .then((r) => r.data),
   },
   content: {
     list: () => apiClient.get("/content").then((r) => r.data.items || []),
@@ -258,5 +260,13 @@ export const api = {
     checkDraft: (data) => apiClient.post("/guardrails/check-draft", data).then((r) => r.data),
     checkTrend: (data) => apiClient.post("/guardrails/check-trend", data).then((r) => r.data),
     checkImage: (data) => apiClient.post("/guardrails/check-image", data).then((r) => r.data),
+  },
+  channelSetup: {
+    getGuides: () => apiClient.get("/channel-setup/guides").then((r) => r.data),
+    getProgress: () => apiClient.get("/channel-setup/progress").then((r) => r.data),
+    updateProgress: (platform, data) =>
+      apiClient.put(`/channel-setup/progress/${encodeURIComponent(platform)}`, data).then((r) => r.data),
+    checkPlatform: (platform, data = {}) =>
+      apiClient.post(`/channel-setup/check/${encodeURIComponent(platform)}`, data).then((r) => r.data),
   },
 };
