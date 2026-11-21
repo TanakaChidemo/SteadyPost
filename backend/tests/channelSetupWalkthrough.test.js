@@ -208,47 +208,34 @@ describe("F27 (#08): Platform Page & Account Setup Walkthrough", () => {
       }
     });
 
-    it("detects 'non_professional_ig' when Page has a personal connected_instagram_account but no instagram_business_account", async () => {
-      const originalFetch = global.fetch;
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: "page_personal_ig",
-          name: "Rosie's Bakery Page",
-          access_token: "page_live_token_123",
-          connected_instagram_account: { id: "ig_personal_1", username: "rosie_personal" },
-        }),
-      });
+    it("detects 'non_professional_ig' when checkPlatform receives instagramAccountType='PERSONAL'", async () => {
+      const res = await request(app)
+        .post("/api/v1/channel-setup/check/instagram")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .set("X-Workspace-Id", workspaceA.id)
+        .send({ instagramAccountType: "PERSONAL" });
 
-      try {
-        const res = await request(app)
-          .post("/api/v1/auth/oauth/meta/connect")
-          .set("Authorization", `Bearer ${ownerToken}`)
-          .set("X-Workspace-Id", workspaceA.id)
-          .send({
-            accessToken: "mock_token",
-            pageId: "page_personal_ig",
-            targetPlatform: "instagram",
-          });
+      expect(res.status).toBe(200);
+      expect(res.body.connected).toBe(false);
+      expect(res.body.handoff).toBe("setup_walkthrough");
+      expect(res.body.progress.blockerReason).toBe("non_professional_ig");
+      expect(res.body.walkthrough.platform).toBe("instagram");
+      expect(res.body.walkthrough.stepNumber).toBe(1);
+    });
 
-        expect(res.status).toBe(200);
-        expect(res.body.connected).toEqual(["facebook"]);
-        expect(res.body.instagramBlocker).toBe("non_professional_ig");
-        expect(res.body.handoff).toBe("setup_walkthrough");
-        expect(res.body.walkthrough.platform).toBe("instagram");
-        expect(res.body.walkthrough.stepNumber).toBe(1);
+    it("shows neutral 'Instagram isn\\'t connected yet.' at step 1 without guessing a blocker when checked with no data", async () => {
+      const res = await request(app)
+        .post("/api/v1/channel-setup/check/instagram")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .set("X-Workspace-Id", workspaceA.id)
+        .send({});
 
-        const igProgress = await channelSetupProgressModel.findByWorkspaceAndPlatform(
-          workspaceA.id,
-          "instagram"
-        );
-        expect(igProgress.status).toBe("in_progress");
-        expect(igProgress.blockerReason).toBe("non_professional_ig");
-        expect(igProgress.currentStep).toBe(1);
-      } finally {
-        global.fetch = originalFetch;
-      }
+      expect(res.status).toBe(200);
+      expect(res.body.connected).toBe(false);
+      expect(res.body.message).toBe("Instagram isn't connected yet.");
+      expect(res.body.progress.blockerReason).toBeNull();
+      expect(res.body.progress.currentStep).toBe(1);
+      expect(res.body.walkthrough.stepNumber).toBe(1);
     });
 
     it("detects 'unlinked_ig' when Facebook Page has no linked Instagram account at all", async () => {
@@ -339,6 +326,62 @@ describe("F27 (#08): Platform Page & Account Setup Walkthrough", () => {
       expect(gbp.currentStep).toBe(3);
       expect(gbp.status).toBe("waiting_on_platform");
       expect(gbp.blockerReason).toBe("unverified_gbp");
+      expect(gbp.isConnected).toBe(false);
+
+      // Linking an unverified sandbox GBP account does NOT mark GBP as done
+      const unverifiedLink = await request(app)
+        .post("/api/v1/social-accounts")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .set("X-Workspace-Id", workspaceA.id)
+        .send({ platform: "gbp", handle: "rosie_gbp_unverified", displayName: "Rosie GBP Sandbox" });
+      expect(unverifiedLink.status).toBe(201);
+
+      const afterUnverifiedRes = await request(app)
+        .get("/api/v1/channel-setup/progress")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .set("X-Workspace-Id", workspaceA.id);
+      const gbpStillWaiting = afterUnverifiedRes.body.items.find((i) => i.platform === "gbp");
+      expect(gbpStillWaiting.status).toBe("waiting_on_platform");
+      expect(gbpStillWaiting.currentStep).toBe(3);
+      expect(gbpStillWaiting.isConnected).toBe(false);
+
+      // Linking a VERIFIED GBP listing marks GBP as done and publish-ready
+      const verifiedLink = await request(app)
+        .post("/api/v1/social-accounts")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .set("X-Workspace-Id", workspaceA.id)
+        .send({
+          platform: "gbp",
+          handle: "rosie_gbp_verified",
+          displayName: "Rosie GBP Verified",
+          verificationState: "VERIFIED",
+        });
+      expect(verifiedLink.status).toBe(201);
+
+      const afterVerifiedRes = await request(app)
+        .get("/api/v1/channel-setup/progress")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .set("X-Workspace-Id", workspaceA.id);
+      const gbpDone = afterVerifiedRes.body.items.find((i) => i.platform === "gbp");
+      expect(gbpDone.status).toBe("done");
+      expect(gbpDone.blockerReason).toBeNull();
+      expect(gbpDone.isConnected).toBe(true);
+    });
+
+    it("rejects cross-platform blocker codes and out-of-range completedSteps on PUT /progress/:platform", async () => {
+      const badBlockerRes = await request(app)
+        .put("/api/v1/channel-setup/progress/facebook")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .set("X-Workspace-Id", workspaceA.id)
+        .send({ blockerReason: "no_gbp_listing" });
+      expect(badBlockerRes.status).toBe(400);
+
+      const badCompletedStepsRes = await request(app)
+        .put("/api/v1/channel-setup/progress/facebook")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .set("X-Workspace-Id", workspaceA.id)
+        .send({ completedSteps: [1, 99] });
+      expect(badCompletedStepsRes.status).toBe(400);
     });
 
     it("completes a full single-session journey from personal FB + personal IG to connected & publishable", async () => {

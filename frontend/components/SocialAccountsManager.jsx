@@ -344,11 +344,19 @@ export function SocialAccountsManager() {
           const connectedAccounts = socialAccounts.filter(
             (a) => a.platform === ch.platform || (ch.platform === "gbp" && a.platform === "google_business")
           );
+          const isPublishReady =
+            ch.platform === "gbp"
+              ? connectedAccounts.some(
+                  (a) =>
+                    String(a.verificationState || "").toUpperCase() === "VERIFIED" ||
+                    a.verified === true
+                )
+              : connectedAccounts.length > 0;
           const platProgress = progressByPlatform[ch.platform];
-          const isWaitingOnPlatform = platProgress?.status === "waiting_on_platform";
-          const hasBlocker = Boolean(platProgress?.blockerReason) && connectedAccounts.length === 0;
+          const isWaitingOnPlatform = platProgress?.status === "waiting_on_platform" && !isPublishReady;
+          const hasBlocker = Boolean(platProgress?.blockerReason) && !isPublishReady;
           const isInProgress =
-            platProgress?.status === "in_progress" && connectedAccounts.length === 0 && !isWaitingOnPlatform;
+            platProgress?.status === "in_progress" && !isPublishReady && !isWaitingOnPlatform;
 
           return (
             <div
@@ -367,7 +375,7 @@ export function SocialAccountsManager() {
                     </div>
                   </div>
 
-                  {connectedAccounts.length > 0 ? (
+                  {isPublishReady ? (
                     <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold shrink-0">
                       <CheckIcon className="w-3.5 h-3.5" />
                       <span>{connectedAccounts.length} Connected</span>
@@ -384,6 +392,10 @@ export function SocialAccountsManager() {
                     <span className="px-2.5 py-1 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold shrink-0">
                       Step {platProgress.currentStep} in progress
                     </span>
+                  ) : connectedAccounts.length > 0 ? (
+                    <span className="px-2.5 py-1 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px] font-semibold shrink-0">
+                      Unverified Listing
+                    </span>
                   ) : (
                     <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-400 text-[11px] font-semibold shrink-0">
                       Inactive
@@ -391,8 +403,8 @@ export function SocialAccountsManager() {
                   )}
                 </div>
 
-                {/* Saved Walkthrough Progress Callout when not connected */}
-                {connectedAccounts.length === 0 && (isWaitingOnPlatform || hasBlocker || isInProgress) && (
+                {/* Saved Walkthrough Progress Callout when not publish-ready */}
+                {!isPublishReady && (isWaitingOnPlatform || hasBlocker || isInProgress) && (
                   <div
                     className={`p-3 rounded-md border text-xs flex items-center justify-between gap-2 ${
                       isWaitingOnPlatform
@@ -425,32 +437,48 @@ export function SocialAccountsManager() {
 
                 {connectedAccounts.length > 0 && (
                   <div className="space-y-2">
-                    {connectedAccounts.map((account) => (
-                      <div
-                        key={account.id}
-                        className="p-3.5 rounded-md bg-slate-950 border border-slate-800 space-y-1.5 text-xs"
-                      >
-                        <div className="flex items-center justify-between text-slate-300">
-                          <span className="font-semibold text-white truncate max-w-[70%]">
-                            {account.displayName}
-                          </span>
-                          {manages && (
-                            <button
-                              onClick={() => handleDisconnect(account.id, account.displayName)}
-                              className="text-[11px] text-rose-400 hover:text-rose-300 font-semibold transition shrink-0"
+                    {connectedAccounts.map((account) => {
+                      const isAccountVerified =
+                        ch.platform !== "gbp" ||
+                        String(account.verificationState || "").toUpperCase() === "VERIFIED" ||
+                        account.verified === true;
+                      return (
+                        <div
+                          key={account.id}
+                          className="p-3.5 rounded-md bg-slate-950 border border-slate-800 space-y-1.5 text-xs"
+                        >
+                          <div className="flex items-center justify-between text-slate-300">
+                            <span className="font-semibold text-white truncate max-w-[70%]">
+                              {account.displayName}
+                            </span>
+                            {manages && (
+                              <button
+                                onClick={() => handleDisconnect(account.id, account.displayName)}
+                                className="text-[11px] text-rose-400 hover:text-rose-300 font-semibold transition shrink-0"
+                              >
+                                Disconnect
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between text-slate-300">
+                            <span className="text-slate-500 font-medium">Status:</span>
+                            <span
+                              className={
+                                isAccountVerified
+                                  ? "text-emerald-400 font-medium"
+                                  : "text-amber-400 font-medium"
+                              }
                             >
-                              Disconnect
-                            </button>
-                          )}
+                              {!isAccountVerified
+                                ? "Linked · Unverified Listing"
+                                : account.isLive
+                                ? "Connected · Live"
+                                : "Demo Account · Sandbox"}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between text-slate-300">
-                          <span className="text-slate-500 font-medium">Status:</span>
-                          <span className="text-emerald-400 font-medium">
-                            {account.isLive ? "Connected · Live" : "Demo Account · Sandbox"}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -458,13 +486,13 @@ export function SocialAccountsManager() {
               <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-slate-500">
-                    {connectedAccounts.length > 0
+                    {isPublishReady
                       ? "Ready for automated publish"
-                      : isWaitingOnPlatform
-                      ? "Awaiting platform review"
+                      : isWaitingOnPlatform || connectedAccounts.length > 0
+                      ? "Awaiting Google verification"
                       : "Not linked yet"}
                   </span>
-                  {canViewWalkthrough && connectedAccounts.length === 0 && (
+                  {canViewWalkthrough && !isPublishReady && (
                     <button
                       type="button"
                       onClick={() => openWalkthroughFor(ch.platform, platProgress?.blockerReason)}
@@ -585,7 +613,7 @@ export function SocialAccountsManager() {
                       type="button"
                       onClick={() => {
                         setIsConnectModalOpen(false);
-                        openWalkthroughFor("gbp", "unverified_gbp");
+                        openWalkthroughFor("gbp");
                       }}
                       className="w-full py-2 px-3 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold transition"
                     >

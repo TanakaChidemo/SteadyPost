@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import defaultWalkthroughData from "../lib/channelWalkthroughs.json";
 import { api } from "../lib/apiClient";
 import {
   FacebookIcon,
@@ -31,6 +30,8 @@ const PLATFORM_STYLES = {
   twitter: "text-slate-200 bg-slate-500/10 border-slate-500/30",
 };
 
+let cachedPlatformGuides = null;
+
 export function SetupWalkthroughModal({
   isOpen,
   onClose,
@@ -43,7 +44,8 @@ export function SetupWalkthroughModal({
   canManage = true,
   viewerRole = "owner",
 }) {
-  const [guides, setGuides] = useState(defaultWalkthroughData.platforms);
+  const [guides, setGuides] = useState(cachedPlatformGuides);
+  const [loadingGuides, setLoadingGuides] = useState(!cachedPlatformGuides);
   const [selectedPlatform, setSelectedPlatform] = useState(initialPlatform || "facebook");
   const [activeStep, setActiveStep] = useState(1);
   const [savingStep, setSavingStep] = useState(false);
@@ -52,25 +54,37 @@ export function SetupWalkthroughModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    if (cachedPlatformGuides) {
+      setGuides(cachedPlatformGuides);
+      setLoadingGuides(false);
+    } else {
+      setLoadingGuides(true);
+    }
     api.channelSetup
       .getGuides()
       .then((data) => {
-        if (data?.platforms) setGuides(data.platforms);
+        if (data?.platforms) {
+          cachedPlatformGuides = data.platforms;
+          setGuides(data.platforms);
+        }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        setLoadingGuides(false);
+      });
   }, [isOpen]);
 
   // Sync selected platform when modal opens with a specific target platform
   useEffect(() => {
     if (!isOpen) return;
-    const target = initialPlatform && guides[initialPlatform] ? initialPlatform : "facebook";
+    const target = initialPlatform && (!guides || guides[initialPlatform]) ? initialPlatform : "facebook";
     setSelectedPlatform(target);
     setCheckFeedback(null);
-  }, [isOpen, initialPlatform]);
+  }, [isOpen, initialPlatform, guides]);
 
   // Restore saved step for the selected platform (or jump to the step matching activeBlocker)
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !guides) return;
     const guide = guides[selectedPlatform];
     if (!guide) return;
 
@@ -98,6 +112,29 @@ export function SetupWalkthroughModal({
   }, [isOpen, selectedPlatform, guides, progressByPlatform, activeBlocker]);
 
   if (!isOpen) return null;
+
+  if (loadingGuides || !guides) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="w-full max-w-md p-6 rounded-xl bg-slate-900 border border-slate-800 text-center space-y-3">
+          <div className="text-xs text-slate-400 animate-pulse">
+            Loading platform setup walkthrough (#08)...
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 rounded bg-slate-800 text-xs text-slate-300 hover:text-white"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const platformGuide = guides[selectedPlatform] || guides.facebook;
   const steps = platformGuide?.steps || [];
@@ -209,10 +246,11 @@ export function SetupWalkthroughModal({
         });
       } else {
         const msg =
+          checkRes?.message ||
           checkRes?.walkthrough?.message ||
-          "Progress saved. Complete the remaining platform step or click 'Connect with Facebook' when ready.";
+          `${platformGuide.name} isn't connected yet.`;
         setCheckFeedback({
-          type: "warning",
+          type: "info",
           text: msg,
         });
       }
@@ -308,21 +346,25 @@ export function SetupWalkthroughModal({
           })}
         </div>
 
-        {/* Stepper Bar */}
+        {/* Stepper Bar — only marks a step with ✓ when it is saved in completedSteps */}
         <div className="flex border-b border-slate-800 bg-slate-950/30 overflow-x-auto">
           {steps.map((step) => {
             const isCurrent = step.number === activeStep;
-            const isCompleted = completedSteps.includes(step.number) || step.number < activeStep || isConnectedDone;
+            const isCompleted = completedSteps.includes(step.number) || isConnectedDone;
+            const isSkipped = !isCompleted && !isCurrent && step.number < activeStep;
             return (
               <button
                 key={step.number}
                 type="button"
                 onClick={() => persistStepChange(step.number)}
+                title={isSkipped ? `Step ${step.number} (skipped)` : `Step ${step.number}`}
                 className={`flex-1 min-w-[130px] py-2.5 px-3 text-xs font-semibold border-b-2 transition flex items-center justify-center gap-2 ${
                   isCurrent
                     ? "border-indigo-500 text-indigo-300 bg-indigo-500/5"
                     : isCompleted
                     ? "border-emerald-500/50 text-slate-300 hover:text-white"
+                    : isSkipped
+                    ? "border-amber-500/30 text-slate-400 hover:text-slate-200"
                     : "border-transparent text-slate-500 hover:text-slate-300"
                 }`}
               >
@@ -335,9 +377,12 @@ export function SetupWalkthroughModal({
                       : "bg-slate-800 text-slate-400"
                   }`}
                 >
-                  {isCompleted && !isCurrent ? "✓" : step.number}
+                  {isCompleted ? "✓" : step.number}
                 </span>
-                <span className="truncate">{step.title}</span>
+                <span className="truncate">
+                  {step.title}
+                  {isSkipped ? " (skipped)" : ""}
+                </span>
               </button>
             );
           })}
@@ -427,7 +472,11 @@ export function SetupWalkthroughModal({
                 </h4>
                 {savedProgress?.lastCheckedAt && (
                   <span className="text-[10px] text-slate-500">
-                    Last checked: {new Date(savedProgress.lastCheckedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    Last checked:{" "}
+                    {new Date(savedProgress.lastCheckedAt).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                   </span>
                 )}
               </div>

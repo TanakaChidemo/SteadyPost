@@ -10,6 +10,8 @@ const socialAccountSchema = new mongoose.Schema(
     externalAccountId: { type: String, required: true },
     displayName: { type: String, required: true },
     accessToken: { type: String, default: null },
+    verificationState: { type: String, default: null },
+    verified: { type: Boolean, default: null },
     linkedBy: { type: String, default: null },
     linkedAt: { type: Date, default: Date.now },
   },
@@ -28,7 +30,17 @@ async function findById(id) {
   return withId(await SocialAccount.findById(id).lean());
 }
 
-async function create({ workspaceId, ownerId, platform, externalAccountId, displayName, accessToken, linkedBy }) {
+async function create({
+  workspaceId,
+  ownerId,
+  platform,
+  externalAccountId,
+  displayName,
+  accessToken,
+  verificationState,
+  verified,
+  linkedBy,
+}) {
   const doc = await SocialAccount.create({
     workspaceId: workspaceId || null,
     ownerId: ownerId || null,
@@ -36,6 +48,8 @@ async function create({ workspaceId, ownerId, platform, externalAccountId, displ
     externalAccountId,
     displayName,
     accessToken: accessToken || null,
+    verificationState: verificationState || null,
+    verified: typeof verified === "boolean" ? verified : null,
     linkedBy: linkedBy || null,
   });
   return withId(doc.toObject());

@@ -42,34 +42,31 @@ class AiServiceLlmAdapter extends BaseLlmAdapter {
   }
 
   async generateCaption(params) {
-    const timeoutMs = parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 20000;
     return this._postJson("/generate/caption", params, {
-      timeoutMs,
+      timeoutMs: 16000,
       logLevel: "warn",
       reason: "AI service unavailable, using built-in generator",
     });
   }
 
   async suggestHashtags(params) {
-    const timeoutMs = parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 20000;
     return this._postJson("/generate/hashtags", params, {
-      timeoutMs,
+      timeoutMs: 16000,
       logLevel: "warn",
       reason: "AI service unavailable, using built-in generator",
     });
   }
 
   async repurposeContent(params) {
-    const timeoutMs = parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 20000;
     return this._postJson("/generate/repurpose", params, {
-      timeoutMs,
+      timeoutMs: 16000,
       logLevel: "warn",
       reason: "AI service unavailable, using built-in generator",
     });
   }
 
   async generateVariants(params) {
-    const timeoutMs = parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 20000;
+    const timeoutMs = parseInt(process.env.AI_SERVICE_TIMEOUT_MS, 10) || 12000;
     return this._postJson("/generate/variants", params, {
       timeoutMs,
       logLevel: "warn",

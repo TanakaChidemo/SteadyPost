@@ -8,7 +8,7 @@ const membershipModel = require("../models/membership.model");
 const businessProfileModel = require("../models/businessProfile.model");
 const notificationSettingsModel = require("../models/notificationSettings.model");
 const socialAccountModel = require("../models/socialAccount.model");
-const { recordDetectedState } = require("./channelSetup.controller");
+const { recordDetectedState, isGbpAccountVerified } = require("./channelSetup.controller");
 const logger = require("../config/logger");
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "changeme_access_secret";
@@ -423,7 +423,7 @@ async function connectMetaPage(req, res) {
 
   try {
     const pageRes = await fetch(
-      `${META_GRAPH_API_BASE}/${pageId}?fields=id,name,access_token,instagram_business_account{id,username},connected_instagram_account{id,username}&access_token=${encodeURIComponent(accessToken)}`
+      `${META_GRAPH_API_BASE}/${pageId}?fields=id,name,access_token,instagram_business_account{id,username}&access_token=${encodeURIComponent(accessToken)}`
     );
     const page = await pageRes.json();
     logger.info({ status: pageRes.status, pageId: page.id }, "Meta Page connect lookup");
@@ -486,33 +486,30 @@ async function connectMetaPage(req, res) {
       return res.json({ connected: ["facebook", "instagram"] });
     }
 
-    // No Instagram Professional account returned on the Page — detect whether
-    // a personal/non-professional IG account is attached vs. unlinked IG.
-    const igBlocker =
-      page.connected_instagram_account || page.has_non_professional_ig
-        ? "non_professional_ig"
-        : "unlinked_ig";
+    // Graph API Page lookup only returns instagram_business_account when a
+    // Professional IG account is linked to the Page; it cannot tell a personal
+    // IG account from an unlinked one. Only flag Instagram when the user was
+    // specifically connecting Instagram.
+    if (targetPlatform === "instagram") {
+      const { progress: igProgress, walkthrough: igWalkthrough } = await recordDetectedState({
+        workspaceId: targetWorkspaceId,
+        userId: req.user.id,
+        platform: "instagram",
+        blockerReason: "unlinked_ig",
+        status: "in_progress",
+      });
 
-    const { progress: igProgress, walkthrough: igWalkthrough } = await recordDetectedState({
-      workspaceId: targetWorkspaceId,
-      userId: req.user.id,
-      platform: "instagram",
-      blockerReason: igBlocker,
-      status: "in_progress",
-    });
+      return res.json({
+        connected: ["facebook"],
+        instagramBlocker: "unlinked_ig",
+        instagramProgress: igProgress,
+        instagramWalkthrough: igWalkthrough,
+        handoff: "setup_walkthrough",
+        walkthrough: igWalkthrough,
+      });
+    }
 
-    return res.json({
-      connected: ["facebook"],
-      instagramBlocker: igBlocker,
-      instagramProgress: igProgress,
-      instagramWalkthrough: igWalkthrough,
-      ...(targetPlatform === "instagram"
-        ? {
-            handoff: "setup_walkthrough",
-            walkthrough: igWalkthrough,
-          }
-        : {}),
-    });
+    return res.json({ connected: ["facebook"] });
   } catch (err) {
     logger.error({ err: err.message }, "Meta Page connect failed");
     return res.status(502).json({ error: "oauth_failed" });
@@ -520,7 +517,7 @@ async function connectMetaPage(req, res) {
 }
 
 async function connectMockAccount(req, res) {
-  const { platform, displayName, handle } = req.body;
+  const { platform, displayName, handle, verificationState, verified } = req.body;
   if (!platform) return res.status(400).json({ error: "platform is required" });
 
   const extId = handle || `${platform}_${Date.now()}`;
@@ -533,11 +530,18 @@ async function connectMockAccount(req, res) {
     platform,
     externalAccountId: extId,
     displayName: name,
+    verificationState: verificationState || null,
+    verified: typeof verified === "boolean" ? verified : null,
     linkedBy: req.user.id,
   });
 
   const normalizedPlatform = platform === "google_business" ? "gbp" : platform;
-  if (["facebook", "instagram", "gbp", "linkedin", "twitter"].includes(normalizedPlatform)) {
+  const shouldMarkDone =
+    normalizedPlatform === "gbp"
+      ? isGbpAccountVerified(account)
+      : ["facebook", "instagram", "linkedin", "twitter"].includes(normalizedPlatform);
+
+  if (shouldMarkDone) {
     await recordDetectedState({
       workspaceId: targetWorkspaceId,
       userId: req.user.id,

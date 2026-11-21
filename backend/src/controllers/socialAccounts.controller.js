@@ -1,5 +1,5 @@
 const socialAccountModel = require("../models/socialAccount.model");
-const { recordDetectedState } = require("./channelSetup.controller");
+const { recordDetectedState, isGbpAccountVerified } = require("./channelSetup.controller");
 
 // Page/IG access tokens are sensitive Graph API credentials — never ship them
 // to the browser. The frontend only needs to know whether an account is a
@@ -15,7 +15,7 @@ async function list(req, res) {
 }
 
 async function link(req, res) {
-  const { platform, displayName, handle } = req.body;
+  const { platform, displayName, handle, verificationState, verified } = req.body;
   if (!platform) return res.status(400).json({ error: "Platform is required" });
 
   const extId = handle || `${platform}_${Date.now()}`;
@@ -27,11 +27,18 @@ async function link(req, res) {
     platform,
     externalAccountId: extId,
     displayName: name,
+    verificationState: verificationState || null,
+    verified: typeof verified === "boolean" ? verified : null,
     linkedBy: req.user.id,
   });
 
   const normalizedPlatform = platform === "google_business" ? "gbp" : platform;
-  if (req.workspaceId && ["facebook", "instagram", "gbp", "linkedin", "twitter"].includes(normalizedPlatform)) {
+  const shouldMarkDone =
+    normalizedPlatform === "gbp"
+      ? isGbpAccountVerified(account)
+      : ["facebook", "instagram", "linkedin", "twitter"].includes(normalizedPlatform);
+
+  if (req.workspaceId && shouldMarkDone) {
     await recordDetectedState({
       workspaceId: req.workspaceId,
       userId: req.user.id,

@@ -4,19 +4,60 @@ const socialAccountModel = require("../models/socialAccount.model");
 
 const VALID_PLATFORMS = channelSetupProgressModel.PLATFORMS;
 const VALID_STATUSES = channelSetupProgressModel.STATUSES;
-const VALID_BLOCKERS = channelSetupProgressModel.BLOCKER_REASONS;
 
 function getPlatformGuide(platform) {
   return walkthroughData.platforms[platform] || null;
 }
 
-function buildWalkthroughHandoff(platform, blockerReason) {
+function getAllowedBlockersForPlatform(platform) {
+  const guide = getPlatformGuide(platform);
+  if (!guide) return [];
+  const fromSteps = (guide.steps || []).flatMap((s) => (Array.isArray(s.blockerCodes) ? s.blockerCodes : []));
+  const fromMessages = Object.keys(guide.blockerMessages || {});
+  return Array.from(new Set([...fromSteps, ...fromMessages]));
+}
+
+/**
+ * A Google Business Profile listing only counts as publish-ready/done once it
+ * has been verified (e.g. verificationState === "VERIFIED" or verified === true).
+ */
+function isGbpAccountVerified(account) {
+  if (!account) return false;
+  if (typeof account.verificationState === "string") {
+    return account.verificationState.toUpperCase() === "VERIFIED";
+  }
+  return account.verified === true;
+}
+
+function isPlatformPublishReady(platform, connectedAccounts = []) {
+  const matching = connectedAccounts.filter(
+    (a) => a.platform === platform || (platform === "gbp" && a.platform === "google_business")
+  );
+  if (matching.length === 0) return false;
+  if (platform === "gbp") {
+    return matching.some(isGbpAccountVerified);
+  }
+  return true;
+}
+
+function buildWalkthroughHandoff(platform, blockerReason, stepNumber = null) {
   const guide = getPlatformGuide(platform);
   if (!guide) return null;
 
   const matchingStep =
-    guide.steps.find((s) => Array.isArray(s.blockerCodes) && s.blockerCodes.includes(blockerReason)) ||
+    (blockerReason &&
+      guide.steps.find((s) => Array.isArray(s.blockerCodes) && s.blockerCodes.includes(blockerReason))) ||
+    (stepNumber && guide.steps.find((s) => s.number === Number(stepNumber))) ||
     guide.steps[0];
+
+  const neutralMessage =
+    platform === "instagram"
+      ? "Instagram isn't connected yet."
+      : platform === "facebook"
+      ? "Facebook Page isn't connected yet."
+      : platform === "gbp"
+      ? "Google Business Profile isn't verified and connected yet."
+      : `${guide.name} isn't connected yet.`;
 
   return {
     feature: "F27",
@@ -28,7 +69,7 @@ function buildWalkthroughHandoff(platform, blockerReason) {
     stepNumber: matchingStep.number,
     blockerReason: blockerReason || null,
     title: matchingStep.title,
-    message: (blockerReason && guide.blockerMessages?.[blockerReason]) || matchingStep.description,
+    message: (blockerReason && guide.blockerMessages?.[blockerReason]) || neutralMessage,
     checklist: matchingStep.instructions,
     linkText: matchingStep.linkText,
     linkUrl: matchingStep.linkUrl,
@@ -83,7 +124,10 @@ async function recordDetectedState({
     });
   }
 
-  const walkthrough = blockerReason ? buildWalkthroughHandoff(platform, blockerReason) : null;
+  const walkthrough =
+    resolvedStatus !== "done"
+      ? buildWalkthroughHandoff(platform, blockerReason, resolvedStep)
+      : null;
   return { progress, walkthrough };
 }
 
@@ -109,18 +153,16 @@ async function getProgress(req, res) {
   const items = VALID_PLATFORMS.map((platform) => {
     const guide = getPlatformGuide(platform);
     const totalSteps = guide ? guide.steps.length : 4;
-    const isConnected = connectedAccounts.some(
-      (a) => a.platform === platform || (platform === "gbp" && a.platform === "google_business")
-    );
+    const isConnected = isPlatformPublishReady(platform, connectedAccounts);
     const existing = byPlatform.get(platform);
 
     if (existing) {
-      // If an account was connected after a blocker was logged, reflect done state
       if (isConnected && existing.status !== "done" && !existing.blockerReason) {
         return {
           ...existing,
           status: "done",
           currentStep: totalSteps,
+          completedSteps: Array.from({ length: totalSteps }, (_, i) => i + 1),
           isConnected: true,
           lastChecked: guide?.lastChecked || null,
         };
@@ -162,15 +204,20 @@ async function updateProgress(req, res) {
   }
 
   const guide = getPlatformGuide(platform);
-  const maxStep = guide ? guide.steps.length : 10;
+  const maxStep = guide ? guide.steps.length : 4;
+  const allowedBlockers = getAllowedBlockersForPlatform(platform);
   const { currentStep, completedSteps, status, blockerReason } = req.body || {};
 
   if (status !== undefined && !VALID_STATUSES.includes(status)) {
     return res.status(400).json({ error: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}` });
   }
 
-  if (blockerReason !== undefined && blockerReason !== null && !VALID_BLOCKERS.includes(blockerReason)) {
-    return res.status(400).json({ error: `Invalid blockerReason: ${blockerReason}` });
+  if (blockerReason !== undefined && blockerReason !== null) {
+    if (!allowedBlockers.includes(blockerReason)) {
+      return res.status(400).json({
+        error: `Blocker '${blockerReason}' is not valid for platform '${platform}'`,
+      });
+    }
   }
 
   const update = {
@@ -187,10 +234,15 @@ async function updateProgress(req, res) {
   }
 
   if (completedSteps !== undefined) {
-    if (!Array.isArray(completedSteps)) {
-      return res.status(400).json({ error: "completedSteps must be an array of step numbers" });
+    if (
+      !Array.isArray(completedSteps) ||
+      !completedSteps.every((n) => Number.isInteger(Number(n)) && Number(n) >= 1 && Number(n) <= maxStep)
+    ) {
+      return res.status(400).json({
+        error: `completedSteps must be an array of step numbers between 1 and ${maxStep}`,
+      });
     }
-    update.completedSteps = completedSteps;
+    update.completedSteps = completedSteps.map(Number);
   }
 
   if (status !== undefined) {
@@ -210,7 +262,9 @@ async function updateProgress(req, res) {
   }
 
   const saved = await channelSetupProgressModel.upsertProgress(req.workspaceId, platform, update);
-  const walkthrough = saved.blockerReason ? buildWalkthroughHandoff(platform, saved.blockerReason) : null;
+  const walkthrough = saved.blockerReason
+    ? buildWalkthroughHandoff(platform, saved.blockerReason, saved.currentStep)
+    : null;
 
   return res.json({
     progress: saved,
@@ -221,7 +275,8 @@ async function updateProgress(req, res) {
 /**
  * POST /api/v1/channel-setup/check/:platform
  * Powers the "Done — check again" button in the setup walkthrough (#08, F27).
- * Evaluates platform readiness from connected workspace accounts or platform check inputs.
+ * Only records a specific blocker when actual detection data is provided;
+ * otherwise preserves neutral "not connected yet" state without guessing.
  */
 async function checkPlatform(req, res) {
   const { platform } = req.params;
@@ -242,9 +297,8 @@ async function checkPlatform(req, res) {
   } = req.body || {};
 
   const existingAccounts = await socialAccountModel.list({ workspaceId });
-  const isAlreadyConnected = existingAccounts.some(
-    (a) => a.platform === platform || (platform === "gbp" && a.platform === "google_business")
-  );
+  const isAlreadyConnected = isPlatformPublishReady(platform, existingAccounts);
+  const existing = await channelSetupProgressModel.findByWorkspaceAndPlatform(workspaceId, platform);
 
   // 1. Facebook detection
   if (platform === "facebook") {
@@ -298,14 +352,23 @@ async function checkPlatform(req, res) {
       return res.json({ connected: true, handoff: null, ...result });
     }
 
-    const result = await recordDetectedState({
-      workspaceId,
-      userId,
-      platform: "facebook",
-      blockerReason: "no_facebook_page",
-      status: "in_progress",
+    // No Meta lookup data provided — don't invent a blocker if none was detected yet
+    const stepToKeep = existing?.currentStep || 1;
+    const blockerToKeep = existing?.blockerReason || null;
+    const saved = await channelSetupProgressModel.upsertProgress(workspaceId, "facebook", {
+      currentStep: stepToKeep,
+      status: existing?.status && existing.status !== "not_started" ? existing.status : "in_progress",
+      blockerReason: blockerToKeep,
+      lastCheckedAt: new Date(),
+      updatedBy: userId,
     });
-    return res.json({ connected: false, handoff: "setup_walkthrough", ...result });
+    return res.json({
+      connected: false,
+      handoff: "setup_walkthrough",
+      message: "Facebook Page isn't connected yet.",
+      progress: saved,
+      walkthrough: buildWalkthroughHandoff("facebook", blockerToKeep, stepToKeep),
+    });
   }
 
   // 2. Instagram detection
@@ -359,16 +422,24 @@ async function checkPlatform(req, res) {
       return res.json({ connected: true, handoff: null, ...result });
     }
 
-    const hasFacebookConnected = existingAccounts.some((a) => a.platform === "facebook");
-    const blockerReason = hasFacebookConnected ? "unlinked_ig" : "non_professional_ig";
-    const result = await recordDetectedState({
-      workspaceId,
-      userId,
-      platform: "instagram",
-      blockerReason,
-      status: "in_progress",
+    // No explicit detection data was passed — do NOT guess non_professional_ig or unlinked_ig.
+    // Start at step 1 with a neutral "Instagram isn't connected yet" message.
+    const stepToKeep = existing?.currentStep || 1;
+    const blockerToKeep = existing?.blockerReason || null;
+    const saved = await channelSetupProgressModel.upsertProgress(workspaceId, "instagram", {
+      currentStep: stepToKeep,
+      status: existing?.status && existing.status !== "not_started" ? existing.status : "in_progress",
+      blockerReason: blockerToKeep,
+      lastCheckedAt: new Date(),
+      updatedBy: userId,
     });
-    return res.json({ connected: false, handoff: "setup_walkthrough", ...result });
+    return res.json({
+      connected: false,
+      handoff: "setup_walkthrough",
+      message: "Instagram isn't connected yet.",
+      progress: saved,
+      walkthrough: buildWalkthroughHandoff("instagram", blockerToKeep, stepToKeep),
+    });
   }
 
   // 3. Google Business Profile detection
@@ -402,9 +473,14 @@ async function checkPlatform(req, res) {
         return res.json({ connected: false, handoff: "setup_walkthrough", ...result });
       }
 
-      const verifiedLoc = gbpLocations.find((loc) => loc && loc.verified === true);
+      const verifiedLoc = gbpLocations.find((loc) => loc && (loc.verified === true || isGbpAccountVerified(loc)));
       if (!verifiedLoc) {
-        const pendingLoc = gbpLocations.find((loc) => loc && loc.verificationPending === true);
+        const pendingLoc = gbpLocations.find(
+          (loc) =>
+            loc &&
+            (loc.verificationPending === true ||
+              String(loc.verificationState || "").toUpperCase() === "PENDING_VERIFICATION")
+        );
         const result = await recordDetectedState({
           workspaceId,
           userId,
@@ -432,7 +508,6 @@ async function checkPlatform(req, res) {
     }
 
     if (gbpVerified === false) {
-      const existing = await channelSetupProgressModel.findByWorkspaceAndPlatform(workspaceId, "gbp");
       const keepWaiting = existing?.status === "waiting_on_platform";
       const result = await recordDetectedState({
         workspaceId,
@@ -461,21 +536,26 @@ async function checkPlatform(req, res) {
       return res.json({ connected: true, handoff: null, ...result });
     }
 
-    const existing = await channelSetupProgressModel.findByWorkspaceAndPlatform(workspaceId, "gbp");
+    // No explicit GBP location payload and no verified GBP account connected yet
     const keepWaiting = existing?.status === "waiting_on_platform";
-    const result = await recordDetectedState({
-      workspaceId,
-      userId,
-      platform: "gbp",
-      blockerReason: "unverified_gbp",
+    const stepToKeep = existing?.currentStep || 1;
+    const blockerToKeep = existing?.blockerReason || null;
+    const saved = await channelSetupProgressModel.upsertProgress(workspaceId, "gbp", {
+      currentStep: stepToKeep,
       status: keepWaiting ? "waiting_on_platform" : "in_progress",
-      currentStep: existing?.currentStep || 3,
+      blockerReason: blockerToKeep,
+      lastCheckedAt: new Date(),
+      updatedBy: userId,
     });
     return res.json({
       connected: false,
       waitingOnPlatform: keepWaiting,
       handoff: "setup_walkthrough",
-      ...result,
+      message: keepWaiting
+        ? "Still waiting on Google verification review."
+        : "Google Business Profile isn't verified and connected yet.",
+      progress: saved,
+      walkthrough: buildWalkthroughHandoff("gbp", blockerToKeep, stepToKeep),
     });
   }
 
@@ -491,7 +571,6 @@ async function checkPlatform(req, res) {
     return res.json({ connected: true, handoff: null, ...result });
   }
 
-  const existing = await channelSetupProgressModel.findByWorkspaceAndPlatform(workspaceId, platform);
   const saved = await channelSetupProgressModel.upsertProgress(workspaceId, platform, {
     currentStep: existing?.currentStep || 1,
     status: existing?.status === "not_started" || !existing ? "in_progress" : existing.status,
@@ -502,12 +581,15 @@ async function checkPlatform(req, res) {
     connected: false,
     handoff: "setup_walkthrough",
     progress: saved,
-    walkthrough: buildWalkthroughHandoff(platform, null),
+    walkthrough: buildWalkthroughHandoff(platform, null, saved.currentStep),
   });
 }
 
 module.exports = {
   getPlatformGuide,
+  getAllowedBlockersForPlatform,
+  isGbpAccountVerified,
+  isPlatformPublishReady,
   buildWalkthroughHandoff,
   recordDetectedState,
   getGuides,
