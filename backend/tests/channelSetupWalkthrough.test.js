@@ -238,7 +238,17 @@ describe("F27 (#08): Platform Page & Account Setup Walkthrough", () => {
       expect(res.body.walkthrough.stepNumber).toBe(1);
     });
 
-    it("detects 'unlinked_ig' when Facebook Page has no linked Instagram account at all", async () => {
+    it("detects 'unlinked_ig' at Step 2 when checkPlatform receives instagramLinkedToPage=false, and stays neutral at Step 1 when connectMetaPage has no instagram_business_account", async () => {
+      const checkUnlinked = await request(app)
+        .post("/api/v1/channel-setup/check/instagram")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .set("X-Workspace-Id", workspaceA.id)
+        .send({ instagramLinkedToPage: false });
+
+      expect(checkUnlinked.status).toBe(200);
+      expect(checkUnlinked.body.progress.blockerReason).toBe("unlinked_ig");
+      expect(checkUnlinked.body.walkthrough.stepNumber).toBe(2);
+
       const originalFetch = global.fetch;
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
@@ -263,9 +273,11 @@ describe("F27 (#08): Platform Page & Account Setup Walkthrough", () => {
 
         expect(res.status).toBe(200);
         expect(res.body.connected).toEqual(["facebook"]);
-        expect(res.body.instagramBlocker).toBe("unlinked_ig");
+        expect(res.body.instagramProgress.blockerReason).toBeNull();
+        expect(res.body.instagramProgress.currentStep).toBe(1);
         expect(res.body.walkthrough.platform).toBe("instagram");
-        expect(res.body.walkthrough.stepNumber).toBe(2);
+        expect(res.body.walkthrough.stepNumber).toBe(1);
+        expect(res.body.walkthrough.message).toBe("Instagram isn't connected yet.");
       } finally {
         global.fetch = originalFetch;
       }

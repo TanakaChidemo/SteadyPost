@@ -423,13 +423,12 @@ async function checkPlatform(req, res) {
     }
 
     // No explicit detection data was passed — do NOT guess non_professional_ig or unlinked_ig.
-    // Start at step 1 with a neutral "Instagram isn't connected yet" message.
-    const stepToKeep = existing?.currentStep || 1;
-    const blockerToKeep = existing?.blockerReason || null;
+    // Clear any stale guessed blocker, start at step 1 (or keep saved step), and show a neutral message.
+    const stepToKeep = existing?.blockerReason ? 1 : existing?.currentStep || 1;
     const saved = await channelSetupProgressModel.upsertProgress(workspaceId, "instagram", {
       currentStep: stepToKeep,
       status: existing?.status && existing.status !== "not_started" ? existing.status : "in_progress",
-      blockerReason: blockerToKeep,
+      blockerReason: null,
       lastCheckedAt: new Date(),
       updatedBy: userId,
     });
@@ -438,7 +437,7 @@ async function checkPlatform(req, res) {
       handoff: "setup_walkthrough",
       message: "Instagram isn't connected yet.",
       progress: saved,
-      walkthrough: buildWalkthroughHandoff("instagram", blockerToKeep, stepToKeep),
+      walkthrough: buildWalkthroughHandoff("instagram", null, stepToKeep),
     });
   }
 

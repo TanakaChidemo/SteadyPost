@@ -488,20 +488,20 @@ async function connectMetaPage(req, res) {
 
     // Graph API Page lookup only returns instagram_business_account when a
     // Professional IG account is linked to the Page; it cannot tell a personal
-    // IG account from an unlinked one. Only flag Instagram when the user was
-    // specifically connecting Instagram.
+    // IG account (Step 1) from an unlinked one (Step 2). When we don't know,
+    // keep blockerReason null, start at Step 1, and show a neutral message.
     if (targetPlatform === "instagram") {
       const { progress: igProgress, walkthrough: igWalkthrough } = await recordDetectedState({
         workspaceId: targetWorkspaceId,
         userId: req.user.id,
         platform: "instagram",
-        blockerReason: "unlinked_ig",
+        blockerReason: null,
         status: "in_progress",
+        currentStep: 1,
       });
 
       return res.json({
         connected: ["facebook"],
-        instagramBlocker: "unlinked_ig",
         instagramProgress: igProgress,
         instagramWalkthrough: igWalkthrough,
         handoff: "setup_walkthrough",

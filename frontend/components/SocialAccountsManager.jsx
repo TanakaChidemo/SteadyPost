@@ -223,12 +223,13 @@ export function SocialAccountsManager() {
       setMetaPages([]);
       await Promise.all([loadAccounts(), loadSetupProgress()]);
 
-      // If Facebook connected but Instagram wasn't linked/professional, guide the user through the IG walkthrough
-      if (res.instagramBlocker && (targetPlat === "instagram" || res.handoff === "setup_walkthrough")) {
-        openWalkthroughFor("instagram", res.instagramBlocker);
+      // If Facebook connected while targeting Instagram, but no Instagram Business account was
+      // returned on the Page, open the Instagram walkthrough neutrally at Step 1.
+      if (!connected.includes("instagram") && (targetPlat === "instagram" || res.handoff === "setup_walkthrough")) {
+        openWalkthroughFor("instagram", res.instagramBlocker || null);
         addToast(
           "info",
-          "Facebook Page connected! Follow the Instagram walkthrough to link your Professional Instagram account."
+          "Facebook Page connected! Instagram isn't connected yet — follow the walkthrough from Step 1."
         );
       }
     } catch (err) {
