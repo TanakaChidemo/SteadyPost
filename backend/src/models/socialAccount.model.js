@@ -10,6 +10,12 @@ const socialAccountSchema = new mongoose.Schema(
     externalAccountId: { type: String, required: true },
     displayName: { type: String, required: true },
     accessToken: { type: String, default: null },
+    isVerified: { type: Boolean, default: true },
+    verificationState: {
+      type: String,
+      enum: ["VERIFIED", "UNVERIFIED", "PENDING_VERIFICATION"],
+      default: "VERIFIED",
+    },
     linkedBy: { type: String, default: null },
     linkedAt: { type: Date, default: Date.now },
   },
@@ -28,7 +34,21 @@ async function findById(id) {
   return withId(await SocialAccount.findById(id).lean());
 }
 
-async function create({ workspaceId, ownerId, platform, externalAccountId, displayName, accessToken, linkedBy }) {
+async function create({
+  workspaceId,
+  ownerId,
+  platform,
+  externalAccountId,
+  displayName,
+  accessToken,
+  linkedBy,
+  isVerified = true,
+  verificationState = "VERIFIED",
+}) {
+  const isGbp = platform === "gbp" || platform === "google_business" || platform === "google";
+  const effectiveState = verificationState || (isVerified === false ? "UNVERIFIED" : "VERIFIED");
+  const effectiveVerified = isGbp ? effectiveState === "VERIFIED" : (isVerified !== false && effectiveState !== "UNVERIFIED");
+
   const doc = await SocialAccount.create({
     workspaceId: workspaceId || null,
     ownerId: ownerId || null,
@@ -37,6 +57,8 @@ async function create({ workspaceId, ownerId, platform, externalAccountId, displ
     displayName,
     accessToken: accessToken || null,
     linkedBy: linkedBy || null,
+    isVerified: effectiveVerified,
+    verificationState: effectiveState,
   });
   return withId(doc.toObject());
 }

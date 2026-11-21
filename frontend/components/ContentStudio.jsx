@@ -24,6 +24,7 @@ import {
 } from "./Icons";
 import { AIModal } from "./AIModal";
 import { can } from "../lib/roles";
+import { SetupWalkthroughModal } from "./SetupWalkthroughModal";
 
 const PLATFORMS = [
   { id: "instagram", label: "Instagram", icon: InstagramIcon, maxChars: 2200, color: "text-pink-400 border-pink-500/40 bg-pink-500/10" },
@@ -37,6 +38,7 @@ const GBP_CTA_LABELS = {
   LEARN_MORE: "Learn More",
   ORDER: "Order Online",
   BOOK: "Book",
+  SHOP: "Shop",
   SIGN_UP: "Sign Up",
   CALL: "Call Now",
 };
@@ -143,6 +145,14 @@ export function ContentStudio() {
   const [gbpTopicType, setGbpTopicType] = useState("STANDARD");
   const [gbpCtaAction, setGbpCtaAction] = useState("LEARN_MORE");
   const [gbpCtaUrl, setGbpCtaUrl] = useState("");
+  const [gbpEventTitle, setGbpEventTitle] = useState("");
+  const [gbpStartDate, setGbpStartDate] = useState("");
+  const [gbpEndDate, setGbpEndDate] = useState("");
+  const [gbpCouponCode, setGbpCouponCode] = useState("");
+  const [gbpRedeemUrl, setGbpRedeemUrl] = useState("");
+  const [gbpTerms, setGbpTerms] = useState("");
+  const [gbpAlertType, setGbpAlertType] = useState("COVID_19");
+  const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
 
   // Approval Pipeline & Post Metrics (#10) state
   const [pipelinePosts, setPipelinePosts] = useState([]);
@@ -195,6 +205,15 @@ export function ContentStudio() {
   );
   const hasGbpSelected = selectedPlatforms.includes("gbp");
 
+  // Check if any selected GBP account is unverified (#13 verification guardrail)
+  const unverifiedGbpAccount = selectedAccountIds
+    .map((id) => socialAccounts.find((a) => a.id === id))
+    .find(
+      (a) =>
+        normalizePlatformId(a?.platform) === "gbp" &&
+        (!a?.isVerified || a?.verificationState !== "VERIFIED")
+    );
+
   const gbpOptionsPayload = hasGbpSelected
     ? {
         topicType: gbpTopicType,
@@ -202,10 +221,45 @@ export function ContentStudio() {
           ? {
               callToAction: {
                 actionType: gbpCtaAction,
-                ...(gbpCtaUrl.trim() ? { url: gbpCtaUrl.trim() } : {}),
+                ...(gbpCtaAction !== "CALL" && gbpCtaUrl.trim() ? { url: gbpCtaUrl.trim() } : {}),
               },
             }
           : {}),
+        ...(gbpTopicType === "EVENT"
+          ? {
+              event: {
+                title: gbpEventTitle.trim() || undefined,
+                ...(gbpStartDate
+                  ? {
+                      startDate: {
+                        year: new Date(gbpStartDate).getFullYear(),
+                        month: new Date(gbpStartDate).getMonth() + 1,
+                        day: new Date(gbpStartDate).getDate(),
+                      },
+                    }
+                  : {}),
+                ...(gbpEndDate
+                  ? {
+                      endDate: {
+                        year: new Date(gbpEndDate).getFullYear(),
+                        month: new Date(gbpEndDate).getMonth() + 1,
+                        day: new Date(gbpEndDate).getDate(),
+                      },
+                    }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(gbpTopicType === "OFFER"
+          ? {
+              offer: {
+                couponCode: gbpCouponCode.trim() || undefined,
+                redeemOnlineUrl: gbpRedeemUrl.trim() || undefined,
+                termsConditions: gbpTerms.trim() || undefined,
+              },
+            }
+          : {}),
+        ...(gbpTopicType === "ALERT" ? { alertType: gbpAlertType } : {}),
       }
     : {};
 
@@ -436,6 +490,14 @@ export function ContentStudio() {
     }
     if (!canPublish) {
       return addToast("error", "Only the business owner can publish.");
+    }
+
+    if (unverifiedGbpAccount) {
+      setIsWalkthroughOpen(true);
+      return addToast(
+        "error",
+        "Google Business Profile listing is unverified. Verification takes several business days. Opening Setup Walkthrough (#08, F27)..."
+      );
     }
 
     const scheduledIso = getValidatedScheduledIso();
@@ -1180,14 +1242,38 @@ export function ContentStudio() {
               )}
 
               {hasGbpSelected && (
-                <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
-                    <GoogleIcon className="w-3.5 h-3.5" />
-                    <span>Google Business Profile Local Post (#13) Options</span>
+                <div className="pt-3 border-t border-slate-800/80 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
+                      <GoogleIcon className="w-3.5 h-3.5" />
+                      <span>Google Business Profile Local Post (#13) Options</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400">Search &amp; Maps</span>
                   </div>
+
+                  {unverifiedGbpAccount && (
+                    <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-200">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">⚠️</span>
+                        <span>
+                          <strong>Listing Verification Required:</strong> {unverifiedGbpAccount.displayName || "Google Business Profile"} is unverified. Verification takes several business days.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsWalkthroughOpen(true)}
+                        className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 border border-amber-500/40 text-[11px] font-semibold transition shrink-0"
+                      >
+                        Setup Walkthrough (#08, F27) →
+                      </button>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     <div>
-                      <label className="block text-[10px] font-medium text-slate-400 mb-1">Topic Type</label>
+                      <label className="block text-[10px] font-medium text-slate-400 mb-1">
+                        Topic Type (4 GBP post types)
+                      </label>
                       <select
                         value={gbpTopicType}
                         onChange={(e) => setGbpTopicType(e.target.value)}
@@ -1196,10 +1282,14 @@ export function ContentStudio() {
                         <option value="STANDARD">Standard Update</option>
                         <option value="EVENT">Event</option>
                         <option value="OFFER">Special Offer</option>
+                        <option value="ALERT">COVID-19 / Safety Alert</option>
                       </select>
                     </div>
+
                     <div>
-                      <label className="block text-[10px] font-medium text-slate-400 mb-1">Call to Action</label>
+                      <label className="block text-[10px] font-medium text-slate-400 mb-1">
+                        Call to Action (CTA Button)
+                      </label>
                       <select
                         value={gbpCtaAction}
                         onChange={(e) => setGbpCtaAction(e.target.value)}
@@ -1209,23 +1299,119 @@ export function ContentStudio() {
                         <option value="LEARN_MORE">Learn More</option>
                         <option value="ORDER">Order Online</option>
                         <option value="BOOK">Book</option>
+                        <option value="SHOP">Shop</option>
                         <option value="SIGN_UP">Sign Up</option>
-                        <option value="CALL">Call Now</option>
+                        <option value="CALL">Call Now (Uses listing phone)</option>
                       </select>
                     </div>
+
                     <div>
                       <label className="block text-[10px] font-medium text-slate-400 mb-1">
-                        CTA URL (optional)
+                        CTA Target URL {gbpCtaAction === "CALL" ? "(Not needed for Call)" : ""}
                       </label>
                       <input
                         type="url"
+                        disabled={gbpCtaAction === "CALL" || !gbpCtaAction}
                         value={gbpCtaUrl}
                         onChange={(e) => setGbpCtaUrl(e.target.value)}
-                        placeholder="https://yourbusiness.com"
-                        className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                        placeholder={gbpCtaAction === "CALL" ? "Uses listing phone" : "https://yourbusiness.com/deal"}
+                        className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 disabled:opacity-40"
                       />
                     </div>
                   </div>
+
+                  {/* EVENT specific fields */}
+                  {gbpTopicType === "EVENT" && (
+                    <div className="p-3 rounded-md bg-slate-950/60 border border-slate-800 space-y-2">
+                      <span className="text-[11px] font-semibold text-amber-300">Event Details</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="block text-[10px] font-medium text-slate-400 mb-1">Event Title</label>
+                          <input
+                            type="text"
+                            value={gbpEventTitle}
+                            onChange={(e) => setGbpEventTitle(e.target.value)}
+                            placeholder="e.g. Weekend Artisan Tasting"
+                            className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-slate-400 mb-1">Start Date</label>
+                          <input
+                            type="date"
+                            value={gbpStartDate}
+                            onChange={(e) => setGbpStartDate(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-slate-400 mb-1">End Date</label>
+                          <input
+                            type="date"
+                            value={gbpEndDate}
+                            onChange={(e) => setGbpEndDate(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* OFFER specific fields */}
+                  {gbpTopicType === "OFFER" && (
+                    <div className="p-3 rounded-md bg-slate-950/60 border border-slate-800 space-y-2">
+                      <span className="text-[11px] font-semibold text-amber-300">Offer Details</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="block text-[10px] font-medium text-slate-400 mb-1">Coupon Code (optional)</label>
+                          <input
+                            type="text"
+                            value={gbpCouponCode}
+                            onChange={(e) => setGbpCouponCode(e.target.value)}
+                            placeholder="e.g. TASTE20"
+                            className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-slate-400 mb-1">Redeem Online URL</label>
+                          <input
+                            type="url"
+                            value={gbpRedeemUrl}
+                            onChange={(e) => setGbpRedeemUrl(e.target.value)}
+                            placeholder="https://yourbusiness.com/redeem"
+                            className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-slate-400 mb-1">Terms &amp; Conditions</label>
+                          <input
+                            type="text"
+                            value={gbpTerms}
+                            onChange={(e) => setGbpTerms(e.target.value)}
+                            placeholder="e.g. One per customer. Valid this weekend."
+                            className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ALERT specific fields */}
+                  {gbpTopicType === "ALERT" && (
+                    <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 space-y-1.5">
+                      <label className="block text-[10px] font-medium text-amber-300">Alert Type</label>
+                      <select
+                        value={gbpAlertType}
+                        onChange={(e) => setGbpAlertType(e.target.value)}
+                        className="w-full sm:w-60 px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500"
+                      >
+                        <option value="COVID_19">COVID-19 / Public Safety Advisory</option>
+                      </select>
+                      <p className="text-[10px] text-amber-200/80">
+                        Alert posts are pinned prominently to your Google Business Profile to inform local customers.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1532,6 +1718,46 @@ export function ContentStudio() {
                     </span>
                   </div>
 
+                  {/* ALERT header if ALERT */}
+                  {gbpTopicType === "ALERT" && (
+                    <div className="p-2 rounded bg-amber-500/15 border border-amber-500/30 text-[11px] text-amber-300 font-semibold flex items-center gap-2">
+                      <span>⚠️ COVID-19 / Public Safety Advisory</span>
+                    </div>
+                  )}
+
+                  {/* EVENT header if EVENT */}
+                  {gbpTopicType === "EVENT" && (
+                    <div className="p-2.5 rounded bg-slate-950 border border-slate-800 space-y-1">
+                      <div className="text-xs font-bold text-white">
+                        📅 {gbpEventTitle || "Local Business Event"}
+                      </div>
+                      {(gbpStartDate || gbpEndDate) && (
+                        <div className="text-[10px] text-amber-300 font-medium">
+                          {gbpStartDate && `Starts: ${gbpStartDate}`} {gbpEndDate && `· Ends: ${gbpEndDate}`}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* OFFER banner if OFFER */}
+                  {gbpTopicType === "OFFER" && (
+                    <div className="p-2.5 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs">
+                      <div>
+                        <div className="font-bold text-amber-300">Special Promotion</div>
+                        {gbpCouponCode && (
+                          <div className="text-[10px] text-slate-300 font-mono mt-0.5">
+                            Promo Code: <strong className="text-white">{gbpCouponCode}</strong>
+                          </div>
+                        )}
+                      </div>
+                      {gbpRedeemUrl && (
+                        <span className="text-[10px] text-blue-400 font-medium underline">
+                          Redeem online
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {activeMediaUrl && !isVideoUrl(activeMediaUrl) && (
                     <div className="rounded-md overflow-hidden border border-slate-800 max-h-52 bg-slate-900">
                       <img src={activeMediaUrl} alt="GBP Local Post photo" className="w-full h-full object-cover" />
@@ -1541,6 +1767,12 @@ export function ContentStudio() {
                   <p className="text-xs text-slate-200 whitespace-pre-wrap leading-relaxed">
                     {body || "Your Google Business Profile local update, offer, or announcement..."}
                   </p>
+
+                  {gbpTopicType === "OFFER" && gbpTerms && (
+                    <p className="text-[10px] text-slate-500 italic">
+                      *{gbpTerms}
+                    </p>
+                  )}
 
                   {gbpCtaAction && (
                     <div className="pt-1">
@@ -1902,6 +2134,13 @@ export function ContentStudio() {
           loadDrafts();
           loadPosts();
         }}
+      />
+
+      {/* Setup Walkthrough Modal (#08, F27) */}
+      <SetupWalkthroughModal
+        isOpen={isWalkthroughOpen}
+        initialStep={5}
+        onClose={() => setIsWalkthroughOpen(false)}
       />
     </div>
   );

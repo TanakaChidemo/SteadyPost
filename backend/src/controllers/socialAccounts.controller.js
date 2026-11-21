@@ -4,7 +4,15 @@ const socialAccountModel = require("../models/socialAccount.model");
 // to the browser. The frontend only needs to know whether an account is a
 // real Meta connection or a sandbox/demo one.
 function toClientAccount({ accessToken, ...rest }) {
-  return { ...rest, isLive: Boolean(accessToken) };
+  const isGbp = rest.platform === "gbp" || rest.platform === "google_business" || rest.platform === "google";
+  const state = rest.verificationState || (rest.isVerified === false ? "UNVERIFIED" : "VERIFIED");
+  const verified = isGbp ? state === "VERIFIED" : (rest.isVerified !== false && state !== "UNVERIFIED");
+  return {
+    ...rest,
+    isLive: Boolean(accessToken),
+    isVerified: verified,
+    verificationState: state,
+  };
 }
 
 async function list(req, res) {
@@ -14,11 +22,15 @@ async function list(req, res) {
 }
 
 async function link(req, res) {
-  const { platform, displayName, handle } = req.body;
+  const { platform, displayName, handle, isVerified, verificationState } = req.body;
   if (!platform) return res.status(400).json({ error: "Platform is required" });
 
   const extId = handle || `${platform}_${Date.now()}`;
   const name = displayName || `${platform.toUpperCase()} Account (@${extId})`;
+
+  const isGbp = platform === "gbp" || platform === "google_business" || platform === "google";
+  const effectiveState = verificationState || (isVerified === false ? "UNVERIFIED" : "VERIFIED");
+  const effectiveVerified = isGbp ? effectiveState === "VERIFIED" : (isVerified !== false && effectiveState !== "UNVERIFIED");
 
   const account = await socialAccountModel.create({
     workspaceId: req.workspaceId || null,
@@ -27,6 +39,8 @@ async function link(req, res) {
     externalAccountId: extId,
     displayName: name,
     linkedBy: req.user.id,
+    isVerified: effectiveVerified,
+    verificationState: effectiveState,
   });
 
   return res.status(201).json(toClientAccount(account));
