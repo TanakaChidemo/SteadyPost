@@ -45,6 +45,10 @@ describe("Permission matrix", () => {
     ["opportunity.respond", "respond to an opportunity", () => ["post", "/opportunities/opp_missing/respond", { action: "skip" }]],
     ["accounts.manage", "connect a social account", () => ["post", "/social-accounts", { platform: "facebook", displayName: "Matrix Page" }]],
     ["accounts.manage", "connect a sandbox account", () => ["post", "/auth/connect-mock", { platform: "instagram" }]],
+    ["workspace.read", "read channel setup walkthrough guides", () => ["get", "/channel-setup/guides"]],
+    ["workspace.read", "read channel setup progress", () => ["get", "/channel-setup/progress"]],
+    ["accounts.manage", "save channel setup progress", () => ["put", "/channel-setup/progress/facebook", { currentStep: 2 }]],
+    ["accounts.manage", "re-check channel setup status", () => ["post", "/channel-setup/check/facebook", { pages: [] }]],
     [
       "accounts.manage",
       "disconnect a social account",
@@ -114,6 +118,7 @@ describe("Permission matrix", () => {
     await db.collection("notificationsettings").deleteMany({ workspaceId: workspace.id });
     await db.collection("contentdrafts").deleteMany({ ownerId: { $in: userIds } });
     await db.collection("socialaccounts").deleteMany({ workspaceId: workspace.id });
+    await db.collection("channelsetupprogresses").deleteMany({ workspaceId: workspace.id });
     await db.collection("scheduledposts").deleteMany({ ownerId: { $in: userIds } });
     await workspaceModel.Workspace.deleteMany({ _id: workspace.id });
     await db.collection("users").deleteMany({ _id: { $in: userIds } });

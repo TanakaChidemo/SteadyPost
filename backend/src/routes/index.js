@@ -12,6 +12,7 @@ const opportunityRoutes = require("./opportunity.routes");
 const websiteRoutes = require("./website.routes");
 const guardrailsRoutes = require("./guardrails.routes");
 const approvalsRoutes = require("./approvals.routes");
+const channelSetupRoutes = require("./channelSetup.routes");
 
 const router = express.Router();
 
@@ -27,5 +28,6 @@ router.use("/publish", publishRoutes);
 router.use("/social-accounts", socialAccountRoutes);
 router.use("/website", websiteRoutes);
 router.use("/approvals", approvalsRoutes);
+router.use("/channel-setup", channelSetupRoutes);
 
 module.exports = router;
