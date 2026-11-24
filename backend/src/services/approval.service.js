@@ -3,6 +3,7 @@ const approvalEventModel = require("../models/approvalEvent.model");
 const { can, refusalMessage } = require("../auth/permissions");
 const { enqueuePublishJob } = require("../queue");
 const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
+const { validateGbpOptions } = require("../utils/gbpValidation");
 const guardrailsService = require("./guardrails/guardrailsService");
 
 /**
@@ -82,6 +83,13 @@ async function applyApprovalAction({ workspaceId, postId, actorId, role, action,
       await validateAccountWorkspaceOwnership({ socialAccountId: post.socialAccountId, workspaceId, userId: actorId });
     } catch (err) {
       throw new ApprovalError(err.status || 403, "ACCOUNT", err.message);
+    }
+  }
+
+  if (action === "submit" || action === "approve") {
+    const gbpErr = validateGbpOptions(post.aiMetadata?.gbpOptions, { requireDates: true });
+    if (gbpErr) {
+      throw new ApprovalError(400, "INVALID_GBP_OPTIONS", gbpErr);
     }
   }
 

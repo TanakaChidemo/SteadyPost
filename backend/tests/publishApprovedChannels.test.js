@@ -68,6 +68,7 @@ describe("Omnichannel Approved Post Publishing & Handoff Tests (#10 & F27)", () 
       platform: "gbp",
       externalAccountId: "accounts/111/locations/222",
       displayName: "Brand Downtown Storefront",
+      verificationState: "VERIFIED",
     });
   });
 
@@ -338,7 +339,14 @@ describe("Omnichannel Approved Post Publishing & Handoff Tests (#10 & F27)", () 
         .send({
           scheduledAt: futureIso,
           socialAccountId: gbpAccount.id,
-          options: { topicType: "EVENT" },
+          options: {
+            topicType: "EVENT",
+            event: {
+              title: "Scheduled Event",
+              startDate: { year: 2026, month: 12, day: 10 },
+              endDate: { year: 2026, month: 12, day: 11 },
+            },
+          },
         });
 
       expect(res.status).toBe(202);

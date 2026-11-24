@@ -1,6 +1,7 @@
 const walkthroughData = require("../data/channelWalkthroughs.json");
 const channelSetupProgressModel = require("../models/channelSetupProgress.model");
 const socialAccountModel = require("../models/socialAccount.model");
+const { isGbpListingVerified } = require("../utils/gbpValidation");
 
 const VALID_PLATFORMS = channelSetupProgressModel.PLATFORMS;
 const VALID_STATUSES = channelSetupProgressModel.STATUSES;
@@ -19,14 +20,10 @@ function getAllowedBlockersForPlatform(platform) {
 
 /**
  * A Google Business Profile listing only counts as publish-ready/done once it
- * has been verified (e.g. verificationState === "VERIFIED" or verified === true).
+ * has been verified according to the shared isGbpListingVerified rule.
  */
 function isGbpAccountVerified(account) {
-  if (!account) return false;
-  if (typeof account.verificationState === "string") {
-    return account.verificationState.toUpperCase() === "VERIFIED";
-  }
-  return account.verified === true;
+  return isGbpListingVerified(account);
 }
 
 function isPlatformPublishReady(platform, connectedAccounts = []) {
@@ -35,7 +32,7 @@ function isPlatformPublishReady(platform, connectedAccounts = []) {
   );
   if (matching.length === 0) return false;
   if (platform === "gbp") {
-    return matching.some(isGbpAccountVerified);
+    return matching.some(isGbpListingVerified);
   }
   return true;
 }
