@@ -200,7 +200,10 @@ describe("Platform Adapter Architecture Tests (#10 & #13)", () => {
           callToAction: { actionType: "LEARN_MORE", url: "https://rosiesbakery.co.uk/event" },
           event: {
             title: "Weekend Tasting",
-            schedule: { startDate: { year: 2026, month: 11, day: 10 } },
+            schedule: {
+              startDate: { year: 2026, month: 11, day: 10 },
+              endDate: { year: 2026, month: 11, day: 11 },
+            },
           },
         },
       });
@@ -220,7 +223,7 @@ describe("Platform Adapter Architecture Tests (#10 & #13)", () => {
           topicType: "STANDARD",
           callToAction: { actionType: "ORDER", url: "https://rosiesbakery.co.uk/order" },
         },
-        account: { isMock: true },
+        account: { isMock: true, verificationState: "VERIFIED", verified: true },
       });
 
       expect(res.platform).toBe("gbp");

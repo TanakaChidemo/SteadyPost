@@ -4,6 +4,7 @@ const ContentDraft = require("../models/contentDraft.model");
 const postModel = require("../models/post.model");
 const scheduledPostModel = require("../models/scheduledPost.model");
 const { validateAccountWorkspaceOwnership } = require("../utils/workspaceValidation");
+const { isGbpAccount, isGbpListingVerified, getGbpUnverifiedError } = require("../utils/gbpValidation");
 
 const publishNowSchema = z.object({
   contentDraftId: z.string().min(1, "contentDraftId is required"),
@@ -70,7 +71,12 @@ async function publishNow(req, res) {
         workspaceId: effectiveWorkspaceId,
         userId: req.user.id,
       });
-      if (account) validatedAccounts.push(account);
+      if (account) {
+        if (isGbpAccount(account) && !isGbpListingVerified(account)) {
+          return res.status(400).json(getGbpUnverifiedError());
+        }
+        validatedAccounts.push(account);
+      }
     } catch (err) {
       return res.status(err.status || 403).json({ error: err.message });
     }
@@ -124,6 +130,17 @@ async function publishNow(req, res) {
 
   const scheduledDate = scheduledAt ? new Date(scheduledAt) : new Date();
   const delay = scheduledAt ? Math.max(0, scheduledDate.getTime() - Date.now()) : 0;
+  const effectiveGbp = options?.topicType ? options : draft.aiMetadata?.gbpOptions;
+  if (effectiveGbp?.topicType === "EVENT") {
+    const ev = effectiveGbp.event || {};
+    const sch = ev.schedule || {};
+    const start = sch.startDate || ev.startDate;
+    const end = sch.endDate || ev.endDate;
+    if (!start || !end) {
+      return res.status(400).json({ error: "Google Business Profile EVENT posts require start date and end date" });
+    }
+  }
+
   const initialStatus = delay > 0 ? "scheduled" : "publishing";
 
   const queuedResults = [];

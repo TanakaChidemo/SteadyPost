@@ -8,7 +8,8 @@ const membershipModel = require("../models/membership.model");
 const businessProfileModel = require("../models/businessProfile.model");
 const notificationSettingsModel = require("../models/notificationSettings.model");
 const socialAccountModel = require("../models/socialAccount.model");
-const { recordDetectedState, isGbpAccountVerified } = require("./channelSetup.controller");
+const { recordDetectedState } = require("./channelSetup.controller");
+const { isGbpListingVerified } = require("../utils/gbpValidation");
 const logger = require("../config/logger");
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "changeme_access_secret";
@@ -538,7 +539,7 @@ async function connectMockAccount(req, res) {
   const normalizedPlatform = platform === "google_business" ? "gbp" : platform;
   const shouldMarkDone =
     normalizedPlatform === "gbp"
-      ? isGbpAccountVerified(account)
+      ? isGbpListingVerified(account)
       : ["facebook", "instagram", "linkedin", "twitter"].includes(normalizedPlatform);
 
   if (shouldMarkDone) {

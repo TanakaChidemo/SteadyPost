@@ -1,11 +1,20 @@
 const socialAccountModel = require("../models/socialAccount.model");
-const { recordDetectedState, isGbpAccountVerified } = require("./channelSetup.controller");
+const { recordDetectedState } = require("./channelSetup.controller");
+const { isGbpListingVerified, isGbpPlatform } = require("../utils/gbpValidation");
 
 // Page/IG access tokens are sensitive Graph API credentials — never ship them
 // to the browser. The frontend only needs to know whether an account is a
 // real Meta connection or a sandbox/demo one.
 function toClientAccount({ accessToken, ...rest }) {
-  return { ...rest, isLive: Boolean(accessToken) };
+  const verified = isGbpListingVerified(rest);
+  const state = rest.verificationState || (verified ? "VERIFIED" : "UNVERIFIED");
+  return {
+    ...rest,
+    isLive: Boolean(accessToken),
+    verified,
+    isVerified: verified,
+    verificationState: state,
+  };
 }
 
 async function list(req, res) {
@@ -15,7 +24,7 @@ async function list(req, res) {
 }
 
 async function link(req, res) {
-  const { platform, displayName, handle, verificationState, verified } = req.body;
+  const { platform, displayName, handle, verificationState, verified, isVerified } = req.body;
   if (!platform) return res.status(400).json({ error: "Platform is required" });
 
   const extId = handle || `${platform}_${Date.now()}`;
@@ -27,15 +36,15 @@ async function link(req, res) {
     platform,
     externalAccountId: extId,
     displayName: name,
-    verificationState: verificationState || null,
-    verified: typeof verified === "boolean" ? verified : null,
+    verificationState,
+    verified: typeof verified === "boolean" ? verified : isVerified,
     linkedBy: req.user.id,
   });
 
   const normalizedPlatform = platform === "google_business" ? "gbp" : platform;
   const shouldMarkDone =
-    normalizedPlatform === "gbp"
-      ? isGbpAccountVerified(account)
+    isGbpPlatform(normalizedPlatform)
+      ? isGbpListingVerified(account)
       : ["facebook", "instagram", "linkedin", "twitter"].includes(normalizedPlatform);
 
   if (req.workspaceId && shouldMarkDone) {

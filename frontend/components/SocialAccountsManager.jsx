@@ -86,6 +86,7 @@ export function SocialAccountsManager() {
   const [selectedChannel, setSelectedChannel] = useState("instagram");
   const [accountHandle, setAccountHandle] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [gbpVerificationState, setGbpVerificationState] = useState("VERIFIED");
   const [loading, setLoading] = useState(false);
   const [metaConnecting, setMetaConnecting] = useState(false);
   // Pages the logged-in Facebook account can grant access to, shown as a
@@ -264,6 +265,12 @@ export function SocialAccountsManager() {
         platform: selectedChannel,
         handle: accountHandle,
         displayName: displayName || `${accountHandle} (${selectedChannel.toUpperCase()})`,
+        ...(selectedChannel === "gbp"
+          ? {
+              verificationState: gbpVerificationState,
+              verified: gbpVerificationState === "VERIFIED",
+            }
+          : {}),
       });
 
       setSocialAccounts([...socialAccounts, created]);
@@ -325,6 +332,7 @@ export function SocialAccountsManager() {
               <span>Setup Walkthrough (#08)</span>
             </button>
           )}
+
           {manages && (
             <button
               type="button"
@@ -347,11 +355,7 @@ export function SocialAccountsManager() {
           );
           const isPublishReady =
             ch.platform === "gbp"
-              ? connectedAccounts.some(
-                  (a) =>
-                    String(a.verificationState || "").toUpperCase() === "VERIFIED" ||
-                    a.verified === true
-                )
+              ? connectedAccounts.some((a) => Boolean(a.isVerified))
               : connectedAccounts.length > 0;
           const platProgress = progressByPlatform[ch.platform];
           const isWaitingOnPlatform = platProgress?.status === "waiting_on_platform" && !isPublishReady;
@@ -440,9 +444,7 @@ export function SocialAccountsManager() {
                   <div className="space-y-2">
                     {connectedAccounts.map((account) => {
                       const isAccountVerified =
-                        ch.platform !== "gbp" ||
-                        String(account.verificationState || "").toUpperCase() === "VERIFIED" ||
-                        account.verified === true;
+                        ch.platform !== "gbp" || Boolean(account.isVerified);
                       return (
                         <div
                           key={account.id}
@@ -463,19 +465,32 @@ export function SocialAccountsManager() {
                           </div>
                           <div className="flex items-center justify-between text-slate-300">
                             <span className="text-slate-500 font-medium">Status:</span>
-                            <span
-                              className={
-                                isAccountVerified
-                                  ? "text-emerald-400 font-medium"
-                                  : "text-amber-400 font-medium"
-                              }
-                            >
-                              {!isAccountVerified
-                                ? "Linked · Unverified Listing"
-                                : account.isLive
-                                ? "Connected · Live"
-                                : "Demo Account · Sandbox"}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={
+                                  isAccountVerified
+                                    ? "text-emerald-400 font-medium"
+                                    : "text-amber-400 font-medium"
+                                }
+                              >
+                                {!isAccountVerified
+                                  ? account.verificationState === "PENDING_VERIFICATION"
+                                    ? "Verification Pending (3–5 business days)"
+                                    : "Linked · Unverified Listing"
+                                  : account.isLive
+                                  ? "Connected · Live"
+                                  : "Demo Account · Sandbox"}
+                              </span>
+                              {!isAccountVerified && canViewWalkthrough && (
+                                <button
+                                  type="button"
+                                  onClick={() => openWalkthroughFor(ch.platform, "unverified_gbp")}
+                                  className="text-[11px] text-amber-300 hover:text-white underline font-semibold"
+                                >
+                                  Verify →
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -558,10 +573,10 @@ export function SocialAccountsManager() {
                         className="w-full flex items-center justify-between px-4 py-3 rounded-md bg-slate-950 border border-slate-800 hover:border-indigo-500/50 text-left transition disabled:opacity-60"
                       >
                         <div>
-                          <div className="text-sm font-semibold text-white flex items-center gap-2">
-                            {page.name}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-white">{page.name}</span>
                             {alreadyConnected && (
-                              <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold">
                                 <CheckIcon className="w-3 h-3" />
                                 Connected
                               </span>
@@ -575,8 +590,8 @@ export function SocialAccountsManager() {
                           {connectingPageId === page.id
                             ? "Connecting..."
                             : alreadyConnected
-                            ? "Refresh token"
-                            : "Connect"}
+                            ? "Re-connect"
+                            : "Connect →"}
                         </span>
                       </button>
                     );
@@ -607,14 +622,15 @@ export function SocialAccountsManager() {
                       Google Business Profile requires a verified listing
                     </div>
                     <p className="text-[11px] text-slate-300">
-                      Don&apos;t have a verified Google listing yet? Follow our step-by-step walkthrough
-                      (video verification typically takes 3–5 business days).
+                      Live Google Business Profile connection is pending Google API approval. Follow our
+                      step-by-step walkthrough to verify your listing (takes 3–5 business days), or use
+                      Sandbox mode below to test Local Posts immediately.
                     </p>
                     <button
                       type="button"
                       onClick={() => {
                         setIsConnectModalOpen(false);
-                        openWalkthroughFor("gbp");
+                        openWalkthroughFor("gbp", "unverified_gbp");
                       }}
                       className="w-full py-2 px-3 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold transition"
                     >
@@ -687,6 +703,27 @@ export function SocialAccountsManager() {
                       className="w-full px-3.5 py-2.5 rounded-md bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
+
+                  {selectedChannel === "gbp" && (
+                    <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/25 space-y-2">
+                      <label className="block text-xs font-medium text-amber-200">
+                        GBP Listing Verification Status (Sandbox Simulation)
+                      </label>
+                      <select
+                        value={gbpVerificationState}
+                        onChange={(e) => setGbpVerificationState(e.target.value)}
+                        className="w-full px-3 py-2 rounded-md bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="VERIFIED">Verified Location (Ready to publish)</option>
+                        <option value="PENDING_VERIFICATION">Pending Verification (Takes 3–5 business days)</option>
+                        <option value="UNVERIFIED">Unverified (Verification required)</option>
+                      </select>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        Note: Linking in sandbox mode creates a mock listing. In production with live Google OAuth,
+                        reconnection will refresh and update the existing listing&apos;s verification status.
+                      </p>
+                    </div>
+                  )}
 
                   <button
                     type="submit"
